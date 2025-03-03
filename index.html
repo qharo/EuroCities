@@ -1,0 +1,1433 @@
+<!DOCTYPE html>
+<html lang="en">
+    <head>
+        <meta charset="UTF-8" />
+        <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+        <title>Urban Accessibility Dashboard</title>
+
+        <!-- External Libraries -->
+        <script src="https://cdn.tailwindcss.com"></script>
+        <link
+            rel="stylesheet"
+            href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css"
+        />
+        <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
+        <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet.heat/0.2.0/leaflet-heat.js"></script>
+        <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/3.9.1/chart.min.js"></script>
+        <script src="https://cdnjs.cloudflare.com/ajax/libs/proj4js/2.8.0/proj4.js"></script>
+
+        <style>
+            .leaflet-container {
+                height: 100%;
+                width: 100%;
+            }
+            .info {
+                padding: 6px 8px;
+                font: 14px/16px Arial, Helvetica, sans-serif;
+                background: rgba(255, 255, 255, 0.8);
+                box-shadow: 0 0 15px rgba(0, 0, 0, 0.2);
+                border-radius: 5px;
+            }
+            .legend {
+                line-height: 18px;
+                color: #555;
+            }
+            .legend i {
+                width: 18px;
+                height: 18px;
+                float: left;
+                margin-right: 8px;
+                opacity: 0.7;
+            }
+            .search-results {
+                max-height: 200px;
+                overflow-y: auto;
+            }
+        </style>
+    </head>
+
+    <body class="bg-gray-100">
+        <div class="min-h-screen flex flex-col">
+            <!-- Header -->
+            <header class="bg-blue-600 text-white p-4 shadow-md">
+                <div class="container mx-auto">
+                    <h1 class="text-2xl font-bold">
+                        Urban Accessibility Dashboard
+                    </h1>
+                </div>
+            </header>
+
+            <!-- Main Content -->
+            <main class="flex-grow flex flex-col md:flex-row">
+                <!-- Map Column -->
+                <div class="w-full md:w-3/5 h-[70vh] md:h-screen relative">
+                    <div
+                        id="loading"
+                        class="absolute inset-0 bg-white bg-opacity-90 z-50 flex items-center justify-center"
+                    >
+                        <div class="text-center p-4">
+                            <div
+                                class="spinner-border inline-block w-8 h-8 border-4 border-t-blue-500 border-r-transparent border-b-blue-500 border-l-transparent rounded-full animate-spin mb-4"
+                            ></div>
+                            <p class="text-gray-700">
+                                Select a city to view the visualization
+                            </p>
+                        </div>
+                    </div>
+
+                    <div id="map" class="h-full"></div>
+                </div>
+
+                <!-- Metrics Column -->
+                <div class="w-full md:w-2/5 p-4 overflow-auto h-screen">
+                    <!-- Search Box -->
+                    <div class="bg-white rounded-lg shadow-md p-4 mb-4">
+                        <h4 class="font-bold text-gray-700 mb-2">
+                            Search City
+                        </h4>
+                        <div class="relative">
+                            <input
+                                type="text"
+                                id="city-search"
+                                placeholder="Type to search..."
+                                class="w-full p-2 border border-gray-300 rounded"
+                            />
+                            <div
+                                id="search-results"
+                                class="absolute left-0 right-0 mt-1 bg-white rounded shadow-lg hidden search-results z-50"
+                            >
+                                <!-- Search results will appear here -->
+                            </div>
+                        </div>
+                        <div
+                            id="selected-city"
+                            class="mt-2 text-xs text-gray-500 text-center"
+                        >
+                            No city selected
+                        </div>
+                    </div>
+
+                    <!-- Visualization Options -->
+                    <div class="bg-white rounded-lg shadow-md p-4 mb-4">
+                        <h4 class="font-bold text-gray-700 mb-2">
+                            Visualization Options
+                        </h4>
+                        <div class="flex flex-col space-y-2">
+                            <div class="grid grid-cols-2 gap-2">
+                                <button
+                                    id="distance-btn"
+                                    class="px-3 py-1 text-sm rounded border border-gray-300 bg-blue-500 text-white hover:bg-blue-600 transition"
+                                >
+                                    Distance to Transit
+                                </button>
+                                <button
+                                    id="modes-btn"
+                                    class="px-3 py-1 text-sm rounded border border-gray-300 bg-white hover:bg-gray-100 transition"
+                                >
+                                    Transit Mode Variety
+                                </button>
+                            </div>
+
+                            <div class="flex items-center mt-1">
+                                <input
+                                    type="checkbox"
+                                    id="show-stops"
+                                    class="mr-2"
+                                    checked
+                                />
+                                <label for="show-stops" class="text-sm"
+                                    >Show Transit Stops</label
+                                >
+                            </div>
+
+                            <div class="flex items-center mt-1">
+                                <input
+                                    type="checkbox"
+                                    id="show-age"
+                                    class="mr-2"
+                                />
+                                <label for="show-age" class="text-sm"
+                                    >Show Building Age</label
+                                >
+                            </div>
+
+                            <div class="flex items-center mt-1">
+                                <input
+                                    type="range"
+                                    id="heatmap-radius"
+                                    min="5"
+                                    max="30"
+                                    value="15"
+                                    class="w-full"
+                                />
+                                <span id="radius-value" class="text-xs ml-2"
+                                    >15</span
+                                >
+                            </div>
+                            <label
+                                for="heatmap-radius"
+                                class="text-xs text-gray-500"
+                                >Heatmap Radius</label
+                            >
+                        </div>
+                    </div>
+
+                    <div class="bg-white rounded-lg shadow-md p-4 mb-4">
+                        <h2 class="text-xl font-bold text-gray-800 mb-3">
+                            City Metrics
+                        </h2>
+                        <div id="city-metrics" class="text-gray-600">
+                            <p class="text-center text-gray-400">
+                                Select a city to see metrics
+                            </p>
+                        </div>
+                    </div>
+
+                    <div class="bg-white rounded-lg shadow-md p-4 mb-4">
+                        <h2 class="text-xl font-bold text-gray-800 mb-3">
+                            Transit Accessibility
+                        </h2>
+                        <div class="h-64">
+                            <canvas id="transit-chart"></canvas>
+                        </div>
+                    </div>
+
+                    <div class="bg-white rounded-lg shadow-md p-4 mb-4">
+                        <h2 class="text-xl font-bold text-gray-800 mb-3">
+                            Transport Mode Distribution
+                        </h2>
+                        <div class="h-64">
+                            <canvas id="mode-chart"></canvas>
+                        </div>
+                    </div>
+
+                    <div class="bg-white rounded-lg shadow-md p-4">
+                        <h2 class="text-xl font-bold text-gray-800 mb-3">
+                            Building Age Distribution
+                        </h2>
+                        <div class="h-64">
+                            <canvas id="age-chart"></canvas>
+                        </div>
+                    </div>
+                </div>
+            </main>
+        </div>
+
+        <script>
+            const cityData = [
+                {
+                    name: "Paris",
+                    geojsonUrl: "paris.geojson",
+                    metricsUrl: "paris_city_metrics.json",
+                },
+                {
+                    name: "Lyon",
+                    geojsonUrl: "lyon.geojson",
+                    metricsUrl: "lyon_city_metrics.json",
+                },
+                {
+                    name: "Marseille",
+                    geojsonUrl: "marseille.geojson",
+                    metricsUrl: "marseille_city_metrics.json",
+                },
+                {
+                    name: "Bordeaux",
+                    geojsonUrl: "bordeaux.geojson",
+                    metricsUrl: "bordeaux_city_metrics.json",
+                },
+                {
+                    name: "Lille",
+                    geojsonUrl: "lille.geojson",
+                    metricsUrl: "lille_city_metrics.json",
+                },
+            ];
+
+            // Variables for our global data and layers
+            // let map, info, distanceLegend, modesLegend, ageLegend;
+            // let heatmapLayer, stopsLayer, buildingAgeHeatmap;
+            // let currentMode = "distance"; // Default view
+            // let geoJsonData; // Will store our GeoJSON data
+            // let ageDistributionData; // Will store building age distribution
+
+            let map, info, distanceLegend, modesLegend, ageLegend;
+            let heatmapLayer, stopsLayer, buildingAgeHeatmap;
+            let currentMode = "distance"; // Default view
+            let geoJsonData; // Will store our GeoJSON data
+            let ageDistributionData; // Will store building age distribution
+            let cityMetricsData;
+
+            // Init map
+            initMap();
+            setupSearchAutocomplete();
+            setupEventListeners();
+
+            // Initialize the map
+            function initMap() {
+                map = L.map("map").setView([46.603354, 1.888334], 6); // Center on France
+
+                L.tileLayer(
+                    "https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png",
+                    {
+                        maxZoom: 19,
+                        attribution:
+                            '&copy; <a href="https://openstreetmap.org/copyright">OpenStreetMap contributors</a>',
+                    }
+                ).addTo(map);
+
+                // Initialize info control
+                info = createInfoControl();
+                info.addTo(map);
+
+                // Initialize legends
+                distanceLegend = createLegend("distance");
+                modesLegend = createLegend("modes");
+                ageLegend = createLegend("age");
+            }
+
+            // Initialize the search autocomplete
+            function setupSearchAutocomplete() {
+                const searchInput = document.getElementById("city-search");
+                const searchResults = document.getElementById("search-results");
+
+                searchInput.addEventListener("input", function () {
+                    const query = this.value.toLowerCase();
+                    if (query.length < 2) {
+                        searchResults.classList.add("hidden");
+                        return;
+                    }
+
+                    const filteredCities = cityData.filter((city) =>
+                        city.name.toLowerCase().includes(query)
+                    );
+
+                    if (filteredCities.length > 0) {
+                        searchResults.innerHTML = "";
+                        filteredCities.forEach((city) => {
+                            const div = document.createElement("div");
+                            div.className =
+                                "p-2 hover:bg-gray-100 cursor-pointer";
+                            div.textContent = city.name;
+                            div.addEventListener("click", () => {
+                                loadCity(city);
+                                searchInput.value = city.name;
+                                searchResults.classList.add("hidden");
+                            });
+                            searchResults.appendChild(div);
+                        });
+                        searchResults.classList.remove("hidden");
+                    } else {
+                        searchResults.classList.add("hidden");
+                    }
+                });
+
+                // Close results when clicking outside
+                document.addEventListener("click", function (e) {
+                    if (
+                        e.target !== searchInput &&
+                        !searchResults.contains(e.target)
+                    ) {
+                        searchResults.classList.add("hidden");
+                    }
+                });
+            }
+            // Load city data
+            function loadCity(city) {
+                document.getElementById(
+                    "selected-city"
+                ).textContent = `Selected: ${city.name}`;
+                document.getElementById("loading").style.display = "flex";
+                document.getElementById("loading").innerHTML = `
+                    <div class="text-center p-4">
+                        <div class="spinner-border inline-block w-8 h-8 border-4 border-t-blue-500 border-r-transparent border-b-blue-500 border-l-transparent rounded-full animate-spin mb-4"></div>
+                        <p class="text-gray-700">Loading data for ${city.name}...</p>
+                    </div>
+                `;
+
+                // Load GeoJSON data
+                fetch(city.geojsonUrl)
+                    .then((response) => {
+                        if (!response.ok)
+                            throw new Error(
+                                `Error loading GeoJSON data for ${city.name}`
+                            );
+                        return response.json();
+                    })
+                    .then((data) => {
+                        // Transform coordinates if needed
+                        geoJsonData = transformGeoJSON(data);
+
+                        // Load city metrics data
+                        return fetch(city.metricsUrl)
+                            .then((response) => {
+                                if (!response.ok)
+                                    throw new Error(
+                                        `Error loading metrics for ${city.name}`
+                                    );
+                                return response.json();
+                            })
+                            .then((cityMetrics) => {
+                                // Extract age distribution data from city metrics
+                                ageDistributionData =
+                                    cityMetrics.building_age_distribution || [];
+                                cityMetricsData = cityMetrics;
+                                return { geoJsonData, cityMetricsData };
+                            })
+                            .catch((error) => {
+                                console.warn(
+                                    "Could not load city metrics data:",
+                                    error
+                                );
+                                ageDistributionData = [];
+                                cityMetricsData = null;
+                                return { geoJsonData, cityMetricsData: null };
+                            });
+                    })
+                    .then((data) => {
+                        document.getElementById("loading").style.display =
+                            "none";
+
+                        // Render visualizations
+                        clearLayers();
+                        toggleMode(currentMode);
+                        createTransitStopsLayer(geoJsonData);
+                        displayCityMetrics(
+                            geoJsonData,
+                            ageDistributionData,
+                            cityMetricsData
+                        );
+
+                        // Fit map to data bounds
+                        fitMapToBounds();
+
+                        // Set up click handlers
+                        setupMapClickHandler();
+                    })
+                    .catch((error) => {
+                        console.error("Error loading city data:", error);
+                        document.getElementById("loading").innerHTML = `
+                            <div class="text-center p-4">
+                                <p class="text-red-600">Error loading data: ${error.message}</p>
+                            </div>
+                        `;
+                    });
+            }
+
+            // Transform coordinates from Lambert-93 to WGS84 if needed
+            function transformGeoJSON(geojson) {
+                // Define coordinate transformation from EPSG:2154 (Lambert 93) to WGS84
+                proj4.defs(
+                    "EPSG:2154",
+                    "+proj=lcc +lat_1=49 +lat_2=44 +lat_0=46.5 +lon_0=3 +x_0=700000 +y_0=6600000 +ellps=GRS80 +towgs84=0,0,0,0,0,0,0 +units=m +no_defs"
+                );
+                proj4.defs("EPSG:4326", "+proj=longlat +datum=WGS84 +no_defs");
+
+                // Create a deep clone of the GeoJSON
+                const transformed = JSON.parse(JSON.stringify(geojson));
+
+                // Check if coordinates need transformation (detect Lambert-93)
+                const needsTransform = transformed.features.some((feature) => {
+                    const coords = feature.geometry.coordinates;
+                    return (
+                        Array.isArray(coords) &&
+                        coords.length === 2 &&
+                        (coords[0] > 600000 || coords[1] > 6000000)
+                    );
+                });
+
+                if (needsTransform) {
+                    transformed.features.forEach((feature) => {
+                        try {
+                            const coords = feature.geometry.coordinates;
+                            const transformedCoords = proj4(
+                                "EPSG:2154",
+                                "EPSG:4326",
+                                coords
+                            );
+                            feature.geometry.coordinates = transformedCoords;
+                        } catch (error) {
+                            console.error("Transformation error:", error);
+                        }
+                    });
+                }
+
+                return transformed;
+            }
+
+            // Clear existing layers
+            function clearLayers() {
+                if (heatmapLayer) map.removeLayer(heatmapLayer);
+                if (buildingAgeHeatmap) map.removeLayer(buildingAgeHeatmap);
+                if (stopsLayer) map.removeLayer(stopsLayer);
+                map.removeControl(distanceLegend);
+                map.removeControl(modesLegend);
+                map.removeControl(ageLegend);
+            }
+
+            // Fit map to data bounds
+            function fitMapToBounds() {
+                if (
+                    !geoJsonData ||
+                    !geoJsonData.features ||
+                    geoJsonData.features.length === 0
+                )
+                    return;
+
+                const bounds = geoJsonData.features.reduce(
+                    (bounds, feature) => {
+                        const coords = feature.geometry.coordinates;
+                        bounds.extend([coords[1], coords[0]]);
+                        return bounds;
+                    },
+                    L.latLngBounds([])
+                );
+
+                if (bounds.isValid()) {
+                    map.fitBounds(bounds);
+                }
+            }
+
+            // Create info control for hovering
+            function createInfoControl() {
+                const info = L.control();
+
+                info.onAdd = function () {
+                    this._div = L.DomUtil.create("div", "info");
+                    this.update();
+                    return this._div;
+                };
+
+                info.update = function (props) {
+                    this._div.innerHTML =
+                        "<h4 class='font-bold mb-1'>Location Information</h4>" +
+                        (props
+                            ? `<b>Distance to transit:</b> ${Math.round(
+                                  props.transport_distance
+                              )} meters<br />` +
+                              `<b>Transit modes within 600m:</b> ${props.transport_modes}<br />` +
+                              (props.year
+                                  ? `<b>Built:</b> ${props.year} (${
+                                        new Date().getFullYear() - props.year
+                                    } years old)<br />`
+                                  : "") +
+                              (props.green_distance
+                                  ? `<b>Distance to green space:</b> ${Math.round(
+                                        props.green_distance
+                                    )} meters<br />`
+                                  : "")
+                            : "Hover over the map");
+                };
+
+                return info;
+            }
+
+            // Create legend based on visualization mode
+            function createLegend(type) {
+                const legend = L.control({ position: "bottomright" });
+
+                legend.onAdd = function () {
+                    const div = L.DomUtil.create("div", "info legend");
+
+                    if (type === "distance") {
+                        const grades = [0, 100, 200, 400, 600, 800, 1000];
+                        div.innerHTML =
+                            "<h4 class='font-bold mb-2'>Distance to Transit (m)</h4>";
+
+                        for (let i = 0; i < grades.length; i++) {
+                            div.innerHTML +=
+                                '<i style="background:' +
+                                getDistanceColor(grades[i] + 1) +
+                                '"></i> ' +
+                                grades[i] +
+                                (grades[i + 1]
+                                    ? "&ndash;" + grades[i + 1] + " m<br>"
+                                    : "+ m");
+                        }
+                    } else if (type === "modes") {
+                        const grades = [0, 1, 2, 3, 4];
+                        div.innerHTML =
+                            "<h4 class='font-bold mb-2'>Transit Mode Variety</h4>";
+
+                        for (let i = 0; i < grades.length; i++) {
+                            div.innerHTML +=
+                                '<i style="background:' +
+                                getModesColor(grades[i]) +
+                                '"></i> ' +
+                                (grades[i] === 0
+                                    ? "None"
+                                    : grades[i] +
+                                      (grades[i + 1]
+                                          ? "&ndash;" + grades[i + 1] + "<br>"
+                                          : "+"));
+                        }
+                    } else if (type === "age") {
+                        const grades = [0, 10, 25, 50, 75, 100, 150, 200];
+                        div.innerHTML =
+                            "<h4 class='font-bold mb-2'>Building Age (years)</h4>";
+
+                        for (let i = 0; i < grades.length; i++) {
+                            const currentYear = new Date().getFullYear();
+                            div.innerHTML +=
+                                '<i style="background:' +
+                                getAgeColor(currentYear - grades[i] - 1) +
+                                '"></i> ' +
+                                grades[i] +
+                                (grades[i + 1]
+                                    ? "&ndash;" + grades[i + 1] + "<br>"
+                                    : "+");
+                        }
+                    }
+
+                    return div;
+                };
+
+                return legend;
+            }
+
+            // Color scales for different metrics
+            function getDistanceColor(d) {
+                return d > 1000
+                    ? "#d73027"
+                    : d > 800
+                    ? "#f46d43"
+                    : d > 600
+                    ? "#fdae61"
+                    : d > 400
+                    ? "#fee08b"
+                    : d > 200
+                    ? "#d9ef8b"
+                    : d > 100
+                    ? "#a6d96a"
+                    : "#1a9850";
+            }
+
+            function getModesColor(d) {
+                return d >= 4
+                    ? "#08519c"
+                    : d >= 3
+                    ? "#3182bd"
+                    : d >= 2
+                    ? "#6baed6"
+                    : d >= 1
+                    ? "#9ecae1"
+                    : "#deebf7";
+            }
+
+            function getAgeColor(year) {
+                if (!year) return "#cccccc"; // No data
+
+                const currentYear = new Date().getFullYear();
+                const age = currentYear - year;
+
+                return age > 200
+                    ? "#67000d"
+                    : age > 150
+                    ? "#a50f15"
+                    : age > 100
+                    ? "#cb181d"
+                    : age > 75
+                    ? "#ef3b2c"
+                    : age > 50
+                    ? "#fb6a4a"
+                    : age > 25
+                    ? "#fc9272"
+                    : age > 10
+                    ? "#fcbba1"
+                    : "#fee5d9";
+            }
+
+            // Toggle between visualization modes
+            function toggleMode(mode) {
+                currentMode = mode;
+
+                // Remove existing layers and legends
+                clearLayers();
+
+                // Update button states
+                document.getElementById("distance-btn").className =
+                    "px-3 py-1 text-sm rounded border border-gray-300 bg-white hover:bg-gray-100 transition";
+                document.getElementById("modes-btn").className =
+                    "px-3 py-1 text-sm rounded border border-gray-300 bg-white hover:bg-gray-100 transition";
+
+                // Add appropriate layer and legend based on mode
+                if (mode === "distance") {
+                    document.getElementById("distance-btn").className =
+                        "px-3 py-1 text-sm rounded border border-gray-300 bg-blue-500 text-white hover:bg-blue-600 transition";
+                    renderHeatmap();
+                    distanceLegend.addTo(map);
+                } else if (mode === "modes") {
+                    document.getElementById("modes-btn").className =
+                        "px-3 py-1 text-sm rounded border border-gray-300 bg-blue-500 text-white hover:bg-blue-600 transition";
+                    renderHeatmap();
+                    modesLegend.addTo(map);
+                } else if (mode === "age") {
+                    renderBuildingAgeHeatmap();
+                    ageLegend.addTo(map);
+                }
+
+                // Update transit stops visibility
+                toggleStops();
+            }
+
+            // Render heatmap based on current mode
+            function renderHeatmap() {
+                if (
+                    !geoJsonData ||
+                    !geoJsonData.features ||
+                    geoJsonData.features.length === 0
+                )
+                    return;
+
+                if (heatmapLayer) map.removeLayer(heatmapLayer);
+
+                const heatData = geoJsonData.features.map((feature) => {
+                    const latlng = [
+                        feature.geometry.coordinates[1],
+                        feature.geometry.coordinates[0],
+                    ];
+                    const intensity =
+                        currentMode === "distance"
+                            ? 1 -
+                              Math.min(
+                                  feature.properties.transport_distance / 1000,
+                                  1
+                              ) // Invert distance
+                            : feature.properties.transport_modes / 4; // Normalize by max expected modes
+
+                    return [latlng[0], latlng[1], intensity];
+                });
+
+                const radius = parseInt(
+                    document.getElementById("heatmap-radius").value
+                );
+
+                heatmapLayer = L.heatLayer(heatData, {
+                    radius: radius,
+                    blur: radius * 1.5,
+                    maxZoom: 18,
+                    gradient:
+                        currentMode === "distance"
+                            ? {
+                                  0.0: "#1a9850",
+                                  0.3: "#a6d96a",
+                                  0.5: "#fee08b",
+                                  0.7: "#fdae61",
+                                  1.0: "#d73027",
+                              }
+                            : {
+                                  0.0: "#deebf7",
+                                  0.3: "#9ecae1",
+                                  0.5: "#6baed6",
+                                  0.7: "#3182bd",
+                                  1.0: "#08519c",
+                              },
+                }).addTo(map);
+            }
+
+            // Render building age heatmap
+            function renderBuildingAgeHeatmap() {
+                if (
+                    !geoJsonData ||
+                    !geoJsonData.features ||
+                    geoJsonData.features.length === 0
+                )
+                    return;
+
+                if (buildingAgeHeatmap) map.removeLayer(buildingAgeHeatmap);
+
+                const currentYear = new Date().getFullYear();
+                const heatData = geoJsonData.features
+                    .filter((feature) => feature.properties.year) // Only buildings with year data
+                    .map((feature) => {
+                        const latlng = [
+                            feature.geometry.coordinates[1],
+                            feature.geometry.coordinates[0],
+                        ];
+                        const age = currentYear - feature.properties.year;
+                        const intensity = Math.min(age / 200, 1); // Normalize by 200 years max
+
+                        return [latlng[0], latlng[1], intensity];
+                    });
+
+                const radius = parseInt(
+                    document.getElementById("heatmap-radius").value
+                );
+
+                buildingAgeHeatmap = L.heatLayer(heatData, {
+                    radius: radius,
+                    blur: radius * 1.5,
+                    maxZoom: 18,
+                    gradient: {
+                        0.0: "#fee5d9",
+                        0.3: "#fc9272",
+                        0.5: "#fb6a4a",
+                        0.7: "#cb181d",
+                        1.0: "#67000d",
+                    },
+                }).addTo(map);
+            }
+
+            // Create transit stops layer
+            function createTransitStopsLayer(data) {
+                if (!data || !data.features || data.features.length === 0)
+                    return;
+
+                if (stopsLayer) map.removeLayer(stopsLayer);
+
+                // Find buildings with shortest distances (likely closest to actual stops)
+                const buildings = [...data.features];
+                buildings.sort(
+                    (a, b) =>
+                        a.properties.transport_distance -
+                        b.properties.transport_distance
+                );
+
+                const stopsGeoJson = {
+                    type: "FeatureCollection",
+                    features: [],
+                };
+
+                // Use the closest ~5% of buildings as proxies for stops
+                const stopCount = Math.max(
+                    5,
+                    Math.ceil(buildings.length * 0.05)
+                );
+                const usedPositions = new Set();
+
+                for (
+                    let i = 0;
+                    i < Math.min(stopCount, buildings.length);
+                    i++
+                ) {
+                    const building = buildings[i];
+                    const coords = building.geometry.coordinates;
+
+                    // Create a simple hash of the position to avoid duplicates
+                    const posKey = `${Math.round(
+                        coords[0] * 1000
+                    )},${Math.round(coords[1] * 1000)}`;
+
+                    if (!usedPositions.has(posKey)) {
+                        usedPositions.add(posKey);
+
+                        stopsGeoJson.features.push({
+                            type: "Feature",
+                            geometry: {
+                                type: "Point",
+                                coordinates: coords,
+                            },
+                            properties: {
+                                type:
+                                    i % 4 === 0
+                                        ? "subway"
+                                        : i % 4 === 1
+                                        ? "bus"
+                                        : i % 4 === 2
+                                        ? "tram"
+                                        : "train",
+                            },
+                        });
+                    }
+                }
+
+                // Create the stops layer
+                stopsLayer = L.geoJSON(stopsGeoJson, {
+                    pointToLayer: function (feature, latlng) {
+                        // Different colors for different transit types
+                        const color =
+                            feature.properties.type === "subway"
+                                ? "#D81B60"
+                                : feature.properties.type === "bus"
+                                ? "#1976D2"
+                                : feature.properties.type === "tram"
+                                ? "#388E3C"
+                                : "#FFC107";
+
+                        return L.circleMarker(latlng, {
+                            radius: 6,
+                            fillColor: color,
+                            color: "white",
+                            weight: 2,
+                            opacity: 1,
+                            fillOpacity: 0.9,
+                        });
+                    },
+                    onEachFeature: function (feature, layer) {
+                        layer.bindPopup(
+                            `<b>${feature.properties.type.toUpperCase()} Stop</b>`
+                        );
+                    },
+                }).addTo(map);
+
+                toggleStops(); // Apply the current checkbox state
+            }
+
+            // Toggle transit stops visibility
+            function toggleStops() {
+                if (!stopsLayer) return;
+
+                if (document.getElementById("show-stops").checked) {
+                    map.addLayer(stopsLayer);
+                } else {
+                    map.removeLayer(stopsLayer);
+                }
+            }
+
+            // Toggle building age visualization
+            function toggleBuildingAge() {
+                if (document.getElementById("show-age").checked) {
+                    toggleMode("age");
+                } else {
+                    toggleMode("distance");
+                }
+            }
+
+            // Setup map click handler
+            function setupMapClickHandler() {
+                map.off("click"); // Remove existing handlers
+
+                map.on("click", function (e) {
+                    if (!geoJsonData || !geoJsonData.features) return;
+
+                    // Find the nearest building to the click location
+                    let minDist = Infinity;
+                    let nearestBuilding = null;
+
+                    geoJsonData.features.forEach((feature) => {
+                        const coords = feature.geometry.coordinates;
+                        const latlng = L.latLng(coords[1], coords[0]);
+                        const distance = e.latlng.distanceTo(latlng);
+
+                        if (distance < minDist) {
+                            minDist = distance;
+                            nearestBuilding = feature;
+                        }
+                    });
+
+                    // If within 100 meters of a building, show its info
+                    if (minDist < 100 && nearestBuilding) {
+                        info.update(nearestBuilding.properties);
+                    }
+                });
+            }
+
+            // Display city metrics
+            function displayCityMetrics(data, ageData, cityMetrics) {
+                const cityMetricsElement =
+                    document.getElementById("city-metrics");
+
+                if (!data || !data.features || data.features.length === 0) {
+                    cityMetricsElement.innerHTML =
+                        "<p class='text-center text-gray-400'>No city metrics data available</p>";
+                    return;
+                }
+
+                // If we have city metrics from the JSON file, use those values
+                if (cityMetrics) {
+                    // Create the metrics HTML using the city-level metrics JSON
+                    cityMetricsElement.innerHTML = `
+                        <div class="grid grid-cols-2 gap-2 text-sm">
+                            <div>Total buildings:</div>
+                            <div class="text-right font-medium">${cityMetrics.total_buildings.toLocaleString()}</div>
+                            <div>Buildings with year data:</div>
+                            <div class="text-right font-medium">${Math.round(
+                                cityMetrics.buildings_with_year_data_pct || 0
+                            )}%</div>
+                            ${
+                                cityMetrics.avg_building_year
+                                    ? `<div>Average building age:</div>
+                                <div class="text-right font-medium">${
+                                    new Date().getFullYear() -
+                                    Math.round(cityMetrics.avg_building_year)
+                                } years</div>`
+                                    : ""
+                            }
+                        </div>
+                        
+                        <div class="mt-3 pt-3 border-t border-gray-200">
+                            <h3 class="font-bold text-gray-700 mb-2">Transit Access</h3>
+                            <div class="grid grid-cols-2 gap-2 text-sm">
+                                <div>Average distance to transit:</div>
+                                <div class="text-right font-medium">${Math.round(
+                                    cityMetrics.avg_transport_distance
+                                )} meters</div>
+                                <div>Buildings near transit:</div>
+                                <div class="text-right font-medium">${Math.round(
+                                    cityMetrics.transit_accessibility_pct
+                                )}%</div>
+                            </div>
+                        </div>
+                        
+                        ${
+                            cityMetrics.green_accessibility_pct !== undefined
+                                ? `
+                        <div class="mt-3 pt-3 border-t border-gray-200">
+                            <h3 class="font-bold text-gray-700 mb-2">Green Space Access</h3>
+                            <div class="grid grid-cols-2 gap-2 text-sm">
+                                <div>Buildings near green space:</div>
+                                <div class="text-right font-medium">${Math.round(
+                                    cityMetrics.green_accessibility_pct
+                                )}%</div>
+                                ${
+                                    cityMetrics.green_space_ratio !== undefined
+                                        ? `
+                                <div>Green space ratio:</div>
+                                <div class="text-right font-medium">${(
+                                    cityMetrics.green_space_ratio * 100
+                                ).toFixed(1)}%</div>`
+                                        : ""
+                                }
+                            </div>
+                        </div>`
+                                : ""
+                        }
+                        
+                        ${
+                            cityMetrics.building_to_street_ratio !== undefined
+                                ? `
+                        <div class="mt-3 pt-3 border-t border-gray-200">
+                            <h3 class="font-bold text-gray-700 mb-2">Urban Form</h3>
+                            <div class="grid grid-cols-2 gap-2 text-sm">
+                                <div>Building-to-street ratio:</div>
+                                <div class="text-right font-medium">${cityMetrics.building_to_street_ratio.toFixed(
+                                    2
+                                )}</div>
+                            </div>
+                        </div>`
+                                : ""
+                        }
+                    `;
+                } else {
+                    // Fallback to calculating metrics from GeoJSON if city metrics file not available
+                    const buildingsWithYear = data.features.filter(
+                        (f) => f.properties.year
+                    ).length;
+                    const totalBuildings = data.features.length;
+                    const buildingsWithYearPercent = Math.round(
+                        (buildingsWithYear / totalBuildings) * 100
+                    );
+
+                    // Calculate transport metrics
+                    const avgDistance =
+                        data.features.reduce(
+                            (sum, b) => sum + b.properties.transit_distance,
+                            0
+                        ) / data.features.length;
+                    const buildingsNearTransit = data.features.filter(
+                        (b) => b.properties.transit_modes > 0
+                    ).length;
+                    const transitAccessPercent = Math.round(
+                        (buildingsNearTransit / totalBuildings) * 100
+                    );
+
+                    // Calculate green space metrics if available
+                    let greenSpaceStats = "";
+                    if (data.features[0].properties.green_distance) {
+                        const avgGreenDistance =
+                            data.features.reduce(
+                                (sum, b) =>
+                                    sum + (b.properties.green_distance || 0),
+                                0
+                            ) / data.features.length;
+                        const buildingsNearGreen = data.features.filter(
+                            (b) => b.properties.nearby_green_area > 0
+                        ).length;
+                        const greenAccessPercent = Math.round(
+                            (buildingsNearGreen / totalBuildings) * 100
+                        );
+
+                        greenSpaceStats = `
+                            <div class="mt-3 pt-3 border-t border-gray-200">
+                                <h3 class="font-bold text-gray-700 mb-2">Green Space Access</h3>
+                                <div class="grid grid-cols-2 gap-2 text-sm">
+                                    <div>Average distance:</div>
+                                    <div class="text-right font-medium">${Math.round(
+                                        avgGreenDistance
+                                    )} meters</div>
+                                    <div>Buildings near green space:</div>
+                                    <div class="text-right font-medium">${greenAccessPercent}%</div>
+                                </div>
+                            </div>
+                        `;
+                    }
+
+                    // Create the metrics HTML
+                    cityMetricsElement.innerHTML = `
+                        <div class="grid grid-cols-2 gap-2 text-sm">
+                            <div>Total buildings:</div>
+                            <div class="text-right font-medium">${totalBuildings.toLocaleString()}</div>
+                            <div>Buildings with year data:</div>
+                            <div class="text-right font-medium">${buildingsWithYear.toLocaleString()} (${buildingsWithYearPercent}%)</div>
+                        </div>
+                        
+                        <div class="mt-3 pt-3 border-t border-gray-200">
+                            <h3 class="font-bold text-gray-700 mb-2">Transit Access</h3>
+                            <div class="grid grid-cols-2 gap-2 text-sm">
+                                <div>Average distance to transit:</div>
+                                <div class="text-right font-medium">${Math.round(
+                                    avgDistance
+                                )} meters</div>
+                                <div>Buildings near transit:</div>
+                                <div class="text-right font-medium">${transitAccessPercent}%</div>
+                            </div>
+                        </div>
+                        
+                        ${greenSpaceStats}
+                    `;
+                }
+
+                // Create the charts
+                createTransitChart(data);
+                createModeChart(data);
+                createAgeChart(ageData);
+            }
+
+            // // Display city metrics
+            // function displayCityMetrics(data, ageData) {
+            //     const cityMetricsElement =
+            //         document.getElementById("city-metrics");
+
+            //     if (!data || !data.features || data.features.length === 0) {
+            //         cityMetricsElement.innerHTML =
+            //             "<p class='text-center text-gray-400'>No city metrics data available</p>";
+            //         return;
+            //     }
+
+            //     // Calculate building metrics
+            //     const buildingsWithYear = data.features.filter(
+            //         (f) => f.properties.year
+            //     ).length;
+            //     const totalBuildings = data.features.length;
+            //     const buildingsWithYearPercent = Math.round(
+            //         (buildingsWithYear / totalBuildings) * 100
+            //     );
+
+            //     // Calculate transport metrics
+            //     const avgDistance =
+            //         data.features.reduce(
+            //             (sum, b) => sum + b.properties.transport_distance,
+            //             0
+            //         ) / data.features.length;
+            //     const buildingsNearTransit = data.features.filter(
+            //         (b) => b.properties.transport_modes > 0
+            //     ).length;
+            //     const transitAccessPercent = Math.round(
+            //         (buildingsNearTransit / totalBuildings) * 100
+            //     );
+
+            //     // Calculate green space metrics if available
+            //     let greenSpaceStats = "";
+            //     if (data.features[0].properties.green_distance) {
+            //         const avgGreenDistance =
+            //             data.features.reduce(
+            //                 (sum, b) =>
+            //                     sum + (b.properties.green_distance || 0),
+            //                 0
+            //             ) / data.features.length;
+            //         const buildingsNearGreen = data.features.filter(
+            //             (b) => b.properties.nearby_green_area > 0
+            //         ).length;
+            //         const greenAccessPercent = Math.round(
+            //             (buildingsNearGreen / totalBuildings) * 100
+            //         );
+
+            //         greenSpaceStats = `
+            //         <div class="mt-3 pt-3 border-t border-gray-200">
+            //             <h3 class="font-bold text-gray-700 mb-2">Green Space Access</h3>
+            //             <div class="grid grid-cols-2 gap-2 text-sm">
+            //                 <div>Average distance:</div>
+            //                 <div class="text-right font-medium">${Math.round(
+            //                     avgGreenDistance
+            //                 )} meters</div>
+            //                 <div>Buildings near green space:</div>
+            //                 <div class="text-right font-medium">${greenAccessPercent}%</div>
+            //             </div>
+            //         </div>
+            //     `;
+            //     }
+
+            //     // Create the metrics HTML
+            //     cityMetricsElement.innerHTML = `
+            //     <div class="grid grid-cols-2 gap-2 text-sm">
+            //         <div>Total buildings:</div>
+            //         <div class="text-right font-medium">${totalBuildings.toLocaleString()}</div>
+            //         <div>Buildings with year data:</div>
+            //         <div class="text-right font-medium">${buildingsWithYear.toLocaleString()} (${buildingsWithYearPercent}%)</div>
+            //     </div>
+
+            //     <div class="mt-3 pt-3 border-t border-gray-200">
+            //         <h3 class="font-bold text-gray-700 mb-2">Transit Access</h3>
+            //         <div class="grid grid-cols-2 gap-2 text-sm">
+            //             <div>Average distance to transit:</div>
+            //             <div class="text-right font-medium">${Math.round(
+            //                 avgDistance
+            //             )} meters</div>
+            //             <div>Buildings near transit:</div>
+            //             <div class="text-right font-medium">${transitAccessPercent}%</div>
+            //         </div>
+            //     </div>
+
+            //     ${greenSpaceStats}
+            // `;
+
+            //     // Create the charts
+            //     createTransitChart(data);
+            //     createModeChart(data);
+            //     createAgeChart(ageData);
+            // }
+
+            // Create transit accessibility chart
+            function createTransitChart(data) {
+                if (!data || !data.features || data.features.length === 0)
+                    return;
+
+                const canvas = document.getElementById("transit-chart");
+                const ctx = canvas.getContext("2d");
+
+                // Calculate distance buckets
+                const distanceBuckets = {
+                    "< 100m": 0,
+                    "100-300m": 0,
+                    "300-600m": 0,
+                    "600-1000m": 0,
+                    "> 1000m": 0,
+                };
+
+                data.features.forEach((feature) => {
+                    const distance = feature.properties.transport_distance;
+                    if (distance < 100) distanceBuckets["< 100m"]++;
+                    else if (distance < 300) distanceBuckets["100-300m"]++;
+                    else if (distance < 600) distanceBuckets["300-600m"]++;
+                    else if (distance < 1000) distanceBuckets["600-1000m"]++;
+                    else distanceBuckets["> 1000m"]++;
+                });
+
+                // Create chart
+                if (window.transitChart) window.transitChart.destroy();
+
+                window.transitChart = new Chart(ctx, {
+                    type: "bar",
+                    data: {
+                        labels: Object.keys(distanceBuckets),
+                        datasets: [
+                            {
+                                label: "Buildings",
+                                data: Object.values(distanceBuckets),
+                                backgroundColor: [
+                                    "#1a9850",
+                                    "#a6d96a",
+                                    "#fee08b",
+                                    "#fdae61",
+                                    "#d73027",
+                                ],
+                                borderWidth: 1,
+                            },
+                        ],
+                    },
+                    options: {
+                        responsive: true,
+                        maintainAspectRatio: false,
+                        plugins: {
+                            legend: { display: false },
+                            title: { display: false },
+                        },
+                        scales: {
+                            y: {
+                                beginAtZero: true,
+                                title: {
+                                    display: true,
+                                    text: "Number of Buildings",
+                                },
+                            },
+                            x: {
+                                title: {
+                                    display: true,
+                                    text: "Distance to Transit",
+                                },
+                            },
+                        },
+                    },
+                });
+            }
+
+            // Create mode distribution chart
+            function createModeChart(data) {
+                if (!data || !data.features || data.features.length === 0)
+                    return;
+
+                const canvas = document.getElementById("mode-chart");
+                const ctx = canvas.getContext("2d");
+
+                // Calculate mode buckets
+                const modeBuckets = {
+                    "No transit": 0,
+                    "1 mode": 0,
+                    "2 modes": 0,
+                    "3 modes": 0,
+                    "4+ modes": 0,
+                };
+
+                data.features.forEach((feature) => {
+                    const modes = feature.properties.transport_modes;
+                    if (modes === 0) modeBuckets["No transit"]++;
+                    else if (modes === 1) modeBuckets["1 mode"]++;
+                    else if (modes === 2) modeBuckets["2 modes"]++;
+                    else if (modes === 3) modeBuckets["3 modes"]++;
+                    else modeBuckets["4+ modes"]++;
+                });
+
+                // Create chart
+                if (window.modeChart) window.modeChart.destroy();
+
+                window.modeChart = new Chart(ctx, {
+                    type: "pie",
+                    data: {
+                        labels: Object.keys(modeBuckets),
+                        datasets: [
+                            {
+                                data: Object.values(modeBuckets),
+                                backgroundColor: [
+                                    "#deebf7",
+                                    "#9ecae1",
+                                    "#6baed6",
+                                    "#3182bd",
+                                    "#08519c",
+                                ],
+                                borderWidth: 1,
+                            },
+                        ],
+                    },
+                    options: {
+                        responsive: true,
+                        maintainAspectRatio: false,
+                        plugins: {
+                            legend: { position: "right" },
+                        },
+                    },
+                });
+            }
+
+            // Create age distribution chart
+            function createAgeChart(ageData) {
+                const canvas = document.getElementById("age-chart");
+                const ctx = canvas.getContext("2d");
+
+                if (!ageData || ageData.length === 0) {
+                    if (window.ageChart) window.ageChart.destroy();
+                    return;
+                }
+
+                // Sort age periods chronologically
+                const periodOrder = [
+                    "Pre-1800",
+                    "1800-1849",
+                    "1850-1899",
+                    "1900-1944",
+                    "1945-1969",
+                    "1970-1989",
+                    "1990-1999",
+                    "2000-2009",
+                    "2010-present",
+                    "Unknown",
+                ];
+
+                const sortedData = [...ageData].sort((a, b) => {
+                    return (
+                        periodOrder.indexOf(a.age_period) -
+                        periodOrder.indexOf(b.age_period)
+                    );
+                });
+
+                // Filter out "Unknown" for the chart
+                const chartData = sortedData.filter(
+                    (item) => item.age_period !== "Unknown"
+                );
+
+                // Create color gradient based on age
+                const backgroundColors = chartData.map((item) => {
+                    const period = item.age_period;
+                    if (period === "Pre-1800") return "#67000d";
+                    if (period === "1800-1849") return "#a50f15";
+                    if (period === "1850-1899") return "#cb181d";
+                    if (period === "1900-1944") return "#ef3b2c";
+                    if (period === "1945-1969") return "#fb6a4a";
+                    if (period === "1970-1989") return "#fc9272";
+                    if (period === "1990-1999") return "#fcbba1";
+                    if (period === "2000-2009") return "#fee0d2";
+                    return "#fee5d9";
+                });
+
+                // Create chart
+                if (window.ageChart) window.ageChart.destroy();
+
+                window.ageChart = new Chart(ctx, {
+                    type: "bar",
+                    data: {
+                        labels: chartData.map((item) => item.age_period),
+                        datasets: [
+                            {
+                                label: "Buildings",
+                                data: chartData.map((item) => item.count),
+                                backgroundColor: backgroundColors,
+                                borderWidth: 1,
+                            },
+                        ],
+                    },
+                    options: {
+                        responsive: true,
+                        maintainAspectRatio: false,
+                        indexAxis: "y",
+                        plugins: {
+                            legend: { display: false },
+                        },
+                        scales: {
+                            x: {
+                                beginAtZero: true,
+                                title: {
+                                    display: true,
+                                    text: "Number of Buildings",
+                                },
+                            },
+                        },
+                    },
+                });
+            }
+
+            // Set up event listeners
+            function setupEventListeners() {
+                document
+                    .getElementById("distance-btn")
+                    .addEventListener("click", () => {
+                        document.getElementById("show-age").checked = false;
+                        toggleMode("distance");
+                    });
+
+                document
+                    .getElementById("modes-btn")
+                    .addEventListener("click", () => {
+                        document.getElementById("show-age").checked = false;
+                        toggleMode("modes");
+                    });
+
+                document
+                    .getElementById("show-stops")
+                    .addEventListener("change", toggleStops);
+                document
+                    .getElementById("show-age")
+                    .addEventListener("change", toggleBuildingAge);
+
+                // Heatmap radius slider
+                document
+                    .getElementById("heatmap-radius")
+                    .addEventListener("input", function (e) {
+                        document.getElementById("radius-value").textContent =
+                            e.target.value;
+                        if (currentMode === "age") {
+                            renderBuildingAgeHeatmap();
+                        } else {
+                            renderHeatmap();
+                        }
+                    });
+            }
+        </script>
+    </body>
+</html>
