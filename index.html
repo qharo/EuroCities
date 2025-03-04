@@ -151,24 +151,7 @@
                                 >
                             </div>
 
-                            <div class="flex items-center mt-1">
-                                <input
-                                    type="range"
-                                    id="heatmap-radius"
-                                    min="5"
-                                    max="30"
-                                    value="15"
-                                    class="w-full"
-                                />
-                                <span id="radius-value" class="text-xs ml-2"
-                                    >15</span
-                                >
-                            </div>
-                            <label
-                                for="heatmap-radius"
-                                class="text-xs text-gray-500"
-                                >Heatmap Radius</label
-                            >
+                            <!-- Removed dot radius slider -->
                         </div>
                     </div>
 
@@ -229,8 +212,10 @@
                 },
                 {
                     name: "Marseille",
-                    geojsonUrl: "marseille.geojson",
-                    metricsUrl: "marseille_city_metrics.json",
+                    geojsonUrl:
+                        "https://raw.githubusercontent.com/qharo/EuroCities/ef2165a6d5654ae6ea9063f78af99a71583a1990/Cities/Marseille/marseille.geojson",
+                    metricsUrl:
+                        "https://raw.githubusercontent.com/qharo/EuroCities/ef2165a6d5654ae6ea9063f78af99a71583a1990/Cities/Marseille/marseille_city_metrics.geojson",
                 },
                 {
                     name: "Bordeaux",
@@ -245,18 +230,13 @@
             ];
 
             // Variables for our global data and layers
-            // let map, info, distanceLegend, modesLegend, ageLegend;
-            // let heatmapLayer, stopsLayer, buildingAgeHeatmap;
-            // let currentMode = "distance"; // Default view
-            // let geoJsonData; // Will store our GeoJSON data
-            // let ageDistributionData; // Will store building age distribution
-
             let map, info, distanceLegend, modesLegend, ageLegend;
-            let heatmapLayer, stopsLayer, buildingAgeHeatmap;
+            let buildingsLayer, stopsLayer, buildingAgeLayer;
             let currentMode = "distance"; // Default view
             let geoJsonData; // Will store our GeoJSON data
             let ageDistributionData; // Will store building age distribution
             let cityMetricsData;
+            let transitPointsData; // Will store transit points info
 
             // Init map
             initMap();
@@ -332,7 +312,12 @@
                     }
                 });
             }
-            // Load city data
+
+            function sanitizeJSONString(jsonString) {
+                // Replace NaN values with null in JSON string
+                return jsonString.replace(/: *NaN/g, ": null");
+            }
+
             function loadCity(city) {
                 document.getElementById(
                     "selected-city"
@@ -352,7 +337,12 @@
                             throw new Error(
                                 `Error loading GeoJSON data for ${city.name}`
                             );
-                        return response.json();
+                        return response.text(); // Get as text first
+                    })
+                    .then((text) => {
+                        // Sanitize JSON string by replacing NaN with null
+                        const sanitizedText = sanitizeJSONString(text);
+                        return JSON.parse(sanitizedText);
                     })
                     .then((data) => {
                         // Transform coordinates if needed
@@ -365,7 +355,12 @@
                                     throw new Error(
                                         `Error loading metrics for ${city.name}`
                                     );
-                                return response.json();
+                                return response.text(); // Get as text first
+                            })
+                            .then((text) => {
+                                // Sanitize JSON string by replacing NaN with null
+                                const sanitizedText = sanitizeJSONString(text);
+                                return JSON.parse(sanitizedText);
                             })
                             .then((cityMetrics) => {
                                 // Extract age distribution data from city metrics
@@ -388,15 +383,14 @@
                         document.getElementById("loading").style.display =
                             "none";
 
+                        // Generate transit stops data
+                        generateTransitPointsData(geoJsonData);
+
                         // Render visualizations
                         clearLayers();
                         toggleMode(currentMode);
-                        createTransitStopsLayer(geoJsonData);
-                        displayCityMetrics(
-                            geoJsonData,
-                            ageDistributionData,
-                            cityMetricsData
-                        );
+                        createTransitStopsLayer();
+                        displayCityMetrics();
 
                         // Fit map to data bounds
                         fitMapToBounds();
@@ -455,10 +449,74 @@
                 return transformed;
             }
 
+            // Generate transit points data
+            function generateTransitPointsData(data) {
+                if (!data || !data.features || data.features.length === 0)
+                    return;
+
+                // Find buildings with shortest distances (likely closest to actual stops)
+                const buildings = [...data.features];
+                buildings.sort(
+                    (a, b) =>
+                        a.properties.transport_distance -
+                        b.properties.transport_distance
+                );
+
+                // Use the closest ~5% of buildings as proxies for stops
+                const stopCount = Math.max(
+                    5,
+                    Math.ceil(buildings.length * 0.05)
+                );
+                const transitPoints = [];
+                const usedPositions = new Set();
+
+                for (
+                    let i = 0;
+                    i < Math.min(stopCount, buildings.length);
+                    i++
+                ) {
+                    const building = buildings[i];
+                    const coords = building.geometry.coordinates;
+
+                    // Create a simple hash of the position to avoid duplicates
+                    const posKey = `${Math.round(
+                        coords[0] * 1000
+                    )},${Math.round(coords[1] * 1000)}`;
+
+                    if (!usedPositions.has(posKey)) {
+                        usedPositions.add(posKey);
+
+                        // Assign transit type based on position
+                        let type = "bus";
+                        if (i % 4 === 0) type = "subway";
+                        else if (i % 4 === 1) type = "bus";
+                        else if (i % 4 === 2) type = "tram";
+                        else type = "train";
+
+                        transitPoints.push({
+                            coords: coords,
+                            type: type,
+                        });
+                    }
+                }
+
+                // Count by type
+                const typeCounts = transitPoints.reduce((acc, point) => {
+                    acc[point.type] = (acc[point.type] || 0) + 1;
+                    return acc;
+                }, {});
+
+                transitPointsData = {
+                    points: transitPoints,
+                    totalCount: transitPoints.length,
+                    typeCounts: typeCounts,
+                };
+            }
+
             // Clear existing layers
             function clearLayers() {
-                if (heatmapLayer) map.removeLayer(heatmapLayer);
-                if (buildingAgeHeatmap) map.removeLayer(buildingAgeHeatmap);
+                if (buildingsLayer) map.removeLayer(buildingsLayer);
+                if (buildingAgeLayer) map.removeLayer(buildingAgeLayer);
                 if (stopsLayer) map.removeLayer(stopsLayer);
                 map.removeControl(distanceLegend);
                 map.removeControl(modesLegend);
@@ -503,12 +561,13 @@
                         "<h4 class='font-bold mb-1'>Location Information</h4>" +
                         (props
                             ? `<b>Distance to transit:</b> ${Math.round(
-                                  props.transport_distance
+                                  props.transit_distance
                               )} meters<br />` +
-                              `<b>Transit modes within 600m:</b> ${props.transport_modes}<br />` +
-                              (props.year
-                                  ? `<b>Built:</b> ${props.year} (${
-                                        new Date().getFullYear() - props.year
+                              `<b>Transit modes within 100m:</b> ${props.transit_modes}<br />` +
+                              (props.year_built && !isNaN(props.year_built)
+                                  ? `<b>Built:</b> ${props.year_built} (${
+                                        new Date().getFullYear() -
+                                        props.year_built
                                     } years old)<br />`
                                   : "") +
                               (props.green_distance
@@ -615,7 +674,7 @@
             }
 
             function getAgeColor(year) {
-                if (!year) return "#cccccc"; // No data
+                if (!year || isNaN(year)) return "#cccccc"; // No data
 
                 const currentYear = new Date().getFullYear();
                 const age = currentYear - year;
@@ -654,15 +713,15 @@
                 if (mode === "distance") {
                     document.getElementById("distance-btn").className =
                         "px-3 py-1 text-sm rounded border border-gray-300 bg-blue-500 text-white hover:bg-blue-600 transition";
-                    renderHeatmap();
+                    renderBuildingDots("distance");
                     distanceLegend.addTo(map);
                 } else if (mode === "modes") {
                     document.getElementById("modes-btn").className =
                         "px-3 py-1 text-sm rounded border border-gray-300 bg-blue-500 text-white hover:bg-blue-600 transition";
-                    renderHeatmap();
+                    renderBuildingDots("modes");
                     modesLegend.addTo(map);
                 } else if (mode === "age") {
-                    renderBuildingAgeHeatmap();
+                    renderBuildingDots("age");
                     ageLegend.addTo(map);
                 }
 
@@ -670,8 +729,8 @@
                 toggleStops();
             }
 
-            // Render heatmap based on current mode
-            function renderHeatmap() {
+            // Render buildings as colored dots
+            function renderBuildingDots(mode) {
                 if (
                     !geoJsonData ||
                     !geoJsonData.features ||
@@ -679,157 +738,129 @@
                 )
                     return;
 
-                if (heatmapLayer) map.removeLayer(heatmapLayer);
+                if (buildingsLayer) map.removeLayer(buildingsLayer);
+                if (buildingAgeLayer) map.removeLayer(buildingAgeLayer);
 
-                const heatData = geoJsonData.features.map((feature) => {
-                    const latlng = [
-                        feature.geometry.coordinates[1],
-                        feature.geometry.coordinates[0],
-                    ];
-                    const intensity =
-                        currentMode === "distance"
-                            ? 1 -
-                              Math.min(
-                                  feature.properties.transport_distance / 1000,
-                                  1
-                              ) // Invert distance
-                            : feature.properties.transport_modes / 4; // Normalize by max expected modes
+                const radius = 4; // Fixed dot radius
 
-                    return [latlng[0], latlng[1], intensity];
-                });
+                // Create a canvas renderer for better performance with many dots
+                const canvasRenderer = L.canvas({ padding: 0.5 });
 
-                const radius = parseInt(
-                    document.getElementById("heatmap-radius").value
-                );
+                if (mode === "age") {
+                    // Filter buildings with year data (changed from year to year_built)
+                    const buildingsWithYear = geoJsonData.features.filter(
+                        (feature) =>
+                            feature.properties.year_built &&
+                            !isNaN(feature.properties.year_built)
+                    );
 
-                heatmapLayer = L.heatLayer(heatData, {
-                    radius: radius,
-                    blur: radius * 1.5,
-                    maxZoom: 18,
-                    gradient:
-                        currentMode === "distance"
-                            ? {
-                                  0.0: "#1a9850",
-                                  0.3: "#a6d96a",
-                                  0.5: "#fee08b",
-                                  0.7: "#fdae61",
-                                  1.0: "#d73027",
-                              }
-                            : {
-                                  0.0: "#deebf7",
-                                  0.3: "#9ecae1",
-                                  0.5: "#6baed6",
-                                  0.7: "#3182bd",
-                                  1.0: "#08519c",
-                              },
-                }).addTo(map);
-            }
+                    // Create a simplified GeoJSON with just the buildings that have year data
+                    const ageGeoJson = {
+                        type: "FeatureCollection",
+                        features: buildingsWithYear,
+                    };
 
-            // Render building age heatmap
-            function renderBuildingAgeHeatmap() {
-                if (
-                    !geoJsonData ||
-                    !geoJsonData.features ||
-                    geoJsonData.features.length === 0
-                )
-                    return;
+                    // Create building age dots
+                    buildingAgeLayer = L.geoJSON(ageGeoJson, {
+                        renderer: canvasRenderer,
+                        pointToLayer: function (feature, latlng) {
+                            return L.circleMarker(latlng, {
+                                radius: radius,
+                                fillColor: getAgeColor(
+                                    feature.properties.year_built
+                                ), // Changed from year to year_built
+                                color: "#000",
+                                weight: 0.5,
+                                opacity: 0.9,
+                                fillOpacity: 0.7,
+                            });
+                        },
+                        onEachFeature: function (feature, layer) {
+                            layer.on({
+                                mouseover: function (e) {
+                                    info.update(feature.properties);
+                                },
+                                mouseout: function (e) {
+                                    info.update();
+                                },
+                            });
+                        },
+                    }).addTo(map);
 
-                if (buildingAgeHeatmap) map.removeLayer(buildingAgeHeatmap);
+                    // If there are no buildings with age data, show a message
+                    if (buildingsWithYear.length === 0) {
+                        alert("No building age data available for this city");
+                        // Fall back to distance visualization
+                        document.getElementById("show-age").checked = false;
+                        toggleMode("distance");
+                    }
+                } else {
+                    // Use all data without sampling for performance
+                    const allBuildingsGeoJson = {
+                        type: "FeatureCollection",
+                        features: geoJsonData.features,
+                    };
 
-                const currentYear = new Date().getFullYear();
-                const heatData = geoJsonData.features
-                    .filter((feature) => feature.properties.year) // Only buildings with year data
-                    .map((feature) => {
-                        const latlng = [
-                            feature.geometry.coordinates[1],
-                            feature.geometry.coordinates[0],
-                        ];
-                        const age = currentYear - feature.properties.year;
-                        const intensity = Math.min(age / 200, 1); // Normalize by 200 years max
+                    // Create distance or modes dots
+                    buildingsLayer = L.geoJSON(allBuildingsGeoJson, {
+                        renderer: canvasRenderer,
+                        pointToLayer: function (feature, latlng) {
+                            const color =
+                                mode === "distance"
+                                    ? getDistanceColor(
+                                          feature.properties.transit_distance
+                                      ) // Changed from transport_distance to transit_distance
+                                    : getModesColor(
+                                          feature.properties.transit_modes
+                                      );
 
-                        return [latlng[0], latlng[1], intensity];
-                    });
-
-                const radius = parseInt(
-                    document.getElementById("heatmap-radius").value
-                );
-
-                buildingAgeHeatmap = L.heatLayer(heatData, {
-                    radius: radius,
-                    blur: radius * 1.5,
-                    maxZoom: 18,
-                    gradient: {
-                        0.0: "#fee5d9",
-                        0.3: "#fc9272",
-                        0.5: "#fb6a4a",
-                        0.7: "#cb181d",
-                        1.0: "#67000d",
-                    },
-                }).addTo(map);
+                            return L.circleMarker(latlng, {
+                                radius: radius,
+                                fillColor: color,
+                                color: "#000",
+                                weight: 0.5,
+                                opacity: 0.9,
+                                fillOpacity: 0.7,
+                            });
+                        },
+                        onEachFeature: function (feature, layer) {
+                            layer.on({
+                                mouseover: function (e) {
+                                    info.update(feature.properties);
+                                },
+                                mouseout: function (e) {
+                                    info.update();
+                                },
+                            });
+                        },
+                    }).addTo(map);
+                }
             }
 
             // Create transit stops layer
-            function createTransitStopsLayer(data) {
-                if (!data || !data.features || data.features.length === 0)
+            function createTransitStopsLayer() {
+                if (
+                    !transitPointsData ||
+                    !transitPointsData.points ||
+                    transitPointsData.points.length === 0
+                )
                     return;
 
                 if (stopsLayer) map.removeLayer(stopsLayer);
 
-                // Find buildings with shortest distances (likely closest to actual stops)
-                const buildings = [...data.features];
-                buildings.sort(
-                    (a, b) =>
-                        a.properties.transport_distance -
-                        b.properties.transport_distance
-                );
-
                 const stopsGeoJson = {
                     type: "FeatureCollection",
-                    features: [],
+                    features: transitPointsData.points.map((point) => ({
+                        type: "Feature",
+                        geometry: {
+                            type: "Point",
+                            coordinates: point.coords,
+                        },
+                        properties: {
+                            type: point.type,
+                        },
+                    })),
                 };
-
-                // Use the closest ~5% of buildings as proxies for stops
-                const stopCount = Math.max(
-                    5,
-                    Math.ceil(buildings.length * 0.05)
-                );
-                const usedPositions = new Set();
-
-                for (
-                    let i = 0;
-                    i < Math.min(stopCount, buildings.length);
-                    i++
-                ) {
-                    const building = buildings[i];
-                    const coords = building.geometry.coordinates;
-
-                    // Create a simple hash of the position to avoid duplicates
-                    const posKey = `${Math.round(
-                        coords[0] * 1000
-                    )},${Math.round(coords[1] * 1000)}`;
-
-                    if (!usedPositions.has(posKey)) {
-                        usedPositions.add(posKey);
-
-                        stopsGeoJson.features.push({
-                            type: "Feature",
-                            geometry: {
-                                type: "Point",
-                                coordinates: coords,
-                            },
-                            properties: {
-                                type:
-                                    i % 4 === 0
-                                        ? "subway"
-                                        : i % 4 === 1
-                                        ? "bus"
-                                        : i % 4 === 2
-                                        ? "tram"
-                                        : "train",
-                            },
-                        });
-                    }
-                }
 
                 // Create the stops layer
                 stopsLayer = L.geoJSON(stopsGeoJson, {
@@ -913,109 +944,103 @@
             }
 
             // Display city metrics
-            function displayCityMetrics(data, ageData, cityMetrics) {
+            function displayCityMetrics() {
                 const cityMetricsElement =
                     document.getElementById("city-metrics");
 
-                if (!data || !data.features || data.features.length === 0) {
+                if (
+                    !geoJsonData ||
+                    !geoJsonData.features ||
+                    geoJsonData.features.length === 0
+                ) {
                     cityMetricsElement.innerHTML =
                         "<p class='text-center text-gray-400'>No city metrics data available</p>";
                     return;
                 }
 
+                // Prepare transit points distribution
+                let transitDistribution = "";
+                if (transitPointsData && transitPointsData.typeCounts) {
+                    transitDistribution = Object.entries(
+                        transitPointsData.typeCounts
+                    )
+                        .map(
+                            ([type, count]) => `
+                            <div>${
+                                type.charAt(0).toUpperCase() + type.slice(1)
+                            }:</div>
+                            <div class="text-right font-medium">${count}</div>
+                        `
+                        )
+                        .join("");
+                }
+
                 // If we have city metrics from the JSON file, use those values
-                if (cityMetrics) {
+                if (cityMetricsData) {
                     // Create the metrics HTML using the city-level metrics JSON
                     cityMetricsElement.innerHTML = `
                         <div class="grid grid-cols-2 gap-2 text-sm">
                             <div>Total buildings:</div>
-                            <div class="text-right font-medium">${cityMetrics.total_buildings.toLocaleString()}</div>
-                            <div>Buildings with year data:</div>
-                            <div class="text-right font-medium">${Math.round(
-                                cityMetrics.buildings_with_year_data_pct || 0
-                            )}%</div>
-                            ${
-                                cityMetrics.avg_building_year
-                                    ? `<div>Average building age:</div>
-                                <div class="text-right font-medium">${
-                                    new Date().getFullYear() -
-                                    Math.round(cityMetrics.avg_building_year)
-                                } years</div>`
-                                    : ""
-                            }
+                            <div class="text-right font-medium">${cityMetricsData.total_buildings.toLocaleString()}</div>
+                            <div>Total transit points:</div>
+                            <div class="text-right font-medium">${
+                                transitPointsData
+                                    ? transitPointsData.totalCount
+                                    : "N/A"
+                            }</div>
                         </div>
                         
                         <div class="mt-3 pt-3 border-t border-gray-200">
-                            <h3 class="font-bold text-gray-700 mb-2">Transit Access</h3>
+                            <h3 class="font-bold text-gray-700 mb-2">Transit Points Distribution</h3>
                             <div class="grid grid-cols-2 gap-2 text-sm">
-                                <div>Average distance to transit:</div>
-                                <div class="text-right font-medium">${Math.round(
-                                    cityMetrics.avg_transport_distance
-                                )} meters</div>
-                                <div>Buildings near transit:</div>
-                                <div class="text-right font-medium">${Math.round(
-                                    cityMetrics.transit_accessibility_pct
-                                )}%</div>
+                                ${transitDistribution}
                             </div>
                         </div>
                         
-                        ${
-                            cityMetrics.green_accessibility_pct !== undefined
-                                ? `
-                        <div class="mt-3 pt-3 border-t border-gray-200">
-                            <h3 class="font-bold text-gray-700 mb-2">Green Space Access</h3>
-                            <div class="grid grid-cols-2 gap-2 text-sm">
-                                <div>Buildings near green space:</div>
-                                <div class="text-right font-medium">${Math.round(
-                                    cityMetrics.green_accessibility_pct
-                                )}%</div>
-                                ${
-                                    cityMetrics.green_space_ratio !== undefined
-                                        ? `
-                                <div>Green space ratio:</div>
-                                <div class="text-right font-medium">${(
-                                    cityMetrics.green_space_ratio * 100
-                                ).toFixed(1)}%</div>`
-                                        : ""
-                                }
-                            </div>
-                        </div>`
-                                : ""
-                        }
-                        
-                        ${
-                            cityMetrics.building_to_street_ratio !== undefined
-                                ? `
                         <div class="mt-3 pt-3 border-t border-gray-200">
                             <h3 class="font-bold text-gray-700 mb-2">Urban Form</h3>
                             <div class="grid grid-cols-2 gap-2 text-sm">
+                                <div>Average distance to transit:</div>
+                                <div class="text-right font-medium">${Math.round(
+                                    cityMetricsData.avg_transport_distance
+                                )} meters</div>
+                                
+                                ${
+                                    cityMetricsData.green_space_ratio !==
+                                    undefined
+                                        ? `
+                                <div>Green cover percentage:</div>
+                                <div class="text-right font-medium">${(
+                                    cityMetricsData.green_space_ratio * 100 || 0
+                                ).toFixed(1)}%</div>`
+                                        : ""
+                                }
+                                
+                                ${
+                                    cityMetricsData.building_to_street_ratio !==
+                                    undefined
+                                        ? `
                                 <div>Building-to-street ratio:</div>
-                                <div class="text-right font-medium">${cityMetrics.building_to_street_ratio.toFixed(
+                                <div class="text-right font-medium">${cityMetricsData.building_to_street_ratio.toFixed(
                                     2
-                                )}</div>
+                                )}</div>`
+                                        : ""
+                                }
                             </div>
-                        </div>`
-                                : ""
-                        }
+                        </div>
                     `;
                 } else {
                     // Fallback to calculating metrics from GeoJSON if city metrics file not available
-                    const buildingsWithYear = data.features.filter(
-                        (f) => f.properties.year
-                    ).length;
-                    const totalBuildings = data.features.length;
-                    const buildingsWithYearPercent = Math.round(
-                        (buildingsWithYear / totalBuildings) * 100
-                    );
+                    const totalBuildings = geoJsonData.features.length;
 
                     // Calculate transport metrics
                     const avgDistance =
-                        data.features.reduce(
-                            (sum, b) => sum + b.properties.transit_distance,
+                        geoJsonData.features.reduce(
+                            (sum, b) => sum + b.properties.transport_distance,
                             0
-                        ) / data.features.length;
-                    const buildingsNearTransit = data.features.filter(
-                        (b) => b.properties.transit_modes > 0
+                        ) / totalBuildings;
+                    const buildingsNearTransit = geoJsonData.features.filter(
+                        (b) => b.properties.transport_modes > 0
                     ).length;
                     const transitAccessPercent = Math.round(
                         (buildingsNearTransit / totalBuildings) * 100
@@ -1023,28 +1048,37 @@
 
                     // Calculate green space metrics if available
                     let greenSpaceStats = "";
-                    if (data.features[0].properties.green_distance) {
-                        const avgGreenDistance =
-                            data.features.reduce(
-                                (sum, b) =>
-                                    sum + (b.properties.green_distance || 0),
-                                0
-                            ) / data.features.length;
-                        const buildingsNearGreen = data.features.filter(
+                    let greenCoverPct = "N/A";
+                    if (geoJsonData.features[0].properties.green_distance) {
+                        const buildingsNearGreen = geoJsonData.features.filter(
                             (b) => b.properties.nearby_green_area > 0
                         ).length;
                         const greenAccessPercent = Math.round(
                             (buildingsNearGreen / totalBuildings) * 100
                         );
 
+                        // Estimate green cover from nearby_green_area if available
+                        if (
+                            geoJsonData.features[0].properties
+                                .nearby_green_area !== undefined
+                        ) {
+                            const totalArea = geoJsonData.features.reduce(
+                                (sum, b) =>
+                                    sum + (b.properties.nearby_green_area || 0),
+                                0
+                            );
+                            greenCoverPct = (
+                                (totalArea / (totalBuildings * 10000)) *
+                                100
+                            ).toFixed(1);
+                        }
+
                         greenSpaceStats = `
                             <div class="mt-3 pt-3 border-t border-gray-200">
-                                <h3 class="font-bold text-gray-700 mb-2">Green Space Access</h3>
+                                <h3 class="font-bold text-gray-700 mb-2">Green Space</h3>
                                 <div class="grid grid-cols-2 gap-2 text-sm">
-                                    <div>Average distance:</div>
-                                    <div class="text-right font-medium">${Math.round(
-                                        avgGreenDistance
-                                    )} meters</div>
+                                    <div>Green cover percentage:</div>
+                                    <div class="text-right font-medium">${greenCoverPct}%</div>
                                     <div>Buildings near green space:</div>
                                     <div class="text-right font-medium">${greenAccessPercent}%</div>
                                 </div>
@@ -1057,129 +1091,50 @@
                         <div class="grid grid-cols-2 gap-2 text-sm">
                             <div>Total buildings:</div>
                             <div class="text-right font-medium">${totalBuildings.toLocaleString()}</div>
-                            <div>Buildings with year data:</div>
-                            <div class="text-right font-medium">${buildingsWithYear.toLocaleString()} (${buildingsWithYearPercent}%)</div>
+                            <div>Total transit points:</div>
+                            <div class="text-right font-medium">${
+                                transitPointsData
+                                    ? transitPointsData.totalCount
+                                    : "N/A"
+                            }</div>
                         </div>
                         
                         <div class="mt-3 pt-3 border-t border-gray-200">
-                            <h3 class="font-bold text-gray-700 mb-2">Transit Access</h3>
+                            <h3 class="font-bold text-gray-700 mb-2">Transit Points Distribution</h3>
+                            <div class="grid grid-cols-2 gap-2 text-sm">
+                                ${transitDistribution}
+                            </div>
+                        </div>
+                        
+                        <div class="mt-3 pt-3 border-t border-gray-200">
+                            <h3 class="font-bold text-gray-700 mb-2">Urban Form</h3>
                             <div class="grid grid-cols-2 gap-2 text-sm">
                                 <div>Average distance to transit:</div>
                                 <div class="text-right font-medium">${Math.round(
                                     avgDistance
                                 )} meters</div>
-                                <div>Buildings near transit:</div>
-                                <div class="text-right font-medium">${transitAccessPercent}%</div>
+                                <div>Green cover percentage:</div>
+                                <div class="text-right font-medium">${greenCoverPct}%</div>
+                                <div>Building-to-street ratio:</div>
+                                <div class="text-right font-medium">N/A</div>
                             </div>
                         </div>
-                        
-                        ${greenSpaceStats}
                     `;
                 }
 
                 // Create the charts
-                createTransitChart(data);
-                createModeChart(data);
-                createAgeChart(ageData);
+                createTransitChart();
+                createModeChart();
+                createAgeChart();
             }
 
-            // // Display city metrics
-            // function displayCityMetrics(data, ageData) {
-            //     const cityMetricsElement =
-            //         document.getElementById("city-metrics");
-
-            //     if (!data || !data.features || data.features.length === 0) {
-            //         cityMetricsElement.innerHTML =
-            //             "<p class='text-center text-gray-400'>No city metrics data available</p>";
-            //         return;
-            //     }
-
-            //     // Calculate building metrics
-            //     const buildingsWithYear = data.features.filter(
-            //         (f) => f.properties.year
-            //     ).length;
-            //     const totalBuildings = data.features.length;
-            //     const buildingsWithYearPercent = Math.round(
-            //         (buildingsWithYear / totalBuildings) * 100
-            //     );
-
-            //     // Calculate transport metrics
-            //     const avgDistance =
-            //         data.features.reduce(
-            //             (sum, b) => sum + b.properties.transport_distance,
-            //             0
-            //         ) / data.features.length;
-            //     const buildingsNearTransit = data.features.filter(
-            //         (b) => b.properties.transport_modes > 0
-            //     ).length;
-            //     const transitAccessPercent = Math.round(
-            //         (buildingsNearTransit / totalBuildings) * 100
-            //     );
-
-            //     // Calculate green space metrics if available
-            //     let greenSpaceStats = "";
-            //     if (data.features[0].properties.green_distance) {
-            //         const avgGreenDistance =
-            //             data.features.reduce(
-            //                 (sum, b) =>
-            //                     sum + (b.properties.green_distance || 0),
-            //                 0
-            //             ) / data.features.length;
-            //         const buildingsNearGreen = data.features.filter(
-            //             (b) => b.properties.nearby_green_area > 0
-            //         ).length;
-            //         const greenAccessPercent = Math.round(
-            //             (buildingsNearGreen / totalBuildings) * 100
-            //         );
-
-            //         greenSpaceStats = `
-            //         <div class="mt-3 pt-3 border-t border-gray-200">
-            //             <h3 class="font-bold text-gray-700 mb-2">Green Space Access</h3>
-            //             <div class="grid grid-cols-2 gap-2 text-sm">
-            //                 <div>Average distance:</div>
-            //                 <div class="text-right font-medium">${Math.round(
-            //                     avgGreenDistance
-            //                 )} meters</div>
-            //                 <div>Buildings near green space:</div>
-            //                 <div class="text-right font-medium">${greenAccessPercent}%</div>
-            //             </div>
-            //         </div>
-            //     `;
-            //     }
-
-            //     // Create the metrics HTML
-            //     cityMetricsElement.innerHTML = `
-            //     <div class="grid grid-cols-2 gap-2 text-sm">
-            //         <div>Total buildings:</div>
-            //         <div class="text-right font-medium">${totalBuildings.toLocaleString()}</div>
-            //         <div>Buildings with year data:</div>
-            //         <div class="text-right font-medium">${buildingsWithYear.toLocaleString()} (${buildingsWithYearPercent}%)</div>
-            //     </div>
-
-            //     <div class="mt-3 pt-3 border-t border-gray-200">
-            //         <h3 class="font-bold text-gray-700 mb-2">Transit Access</h3>
-            //         <div class="grid grid-cols-2 gap-2 text-sm">
-            //             <div>Average distance to transit:</div>
-            //             <div class="text-right font-medium">${Math.round(
-            //                 avgDistance
-            //             )} meters</div>
-            //             <div>Buildings near transit:</div>
-            //             <div class="text-right font-medium">${transitAccessPercent}%</div>
-            //         </div>
-            //     </div>
-
-            //     ${greenSpaceStats}
-            // `;
-
-            //     // Create the charts
-            //     createTransitChart(data);
-            //     createModeChart(data);
-            //     createAgeChart(ageData);
-            // }
-
             // Create transit accessibility chart
-            function createTransitChart(data) {
-                if (!data || !data.features || data.features.length === 0)
+            function createTransitChart() {
+                if (
+                    !geoJsonData ||
+                    !geoJsonData.features ||
+                    geoJsonData.features.length === 0
+                )
                     return;
 
                 const canvas = document.getElementById("transit-chart");
@@ -1194,14 +1149,33 @@
                     "> 1000m": 0,
                 };
 
-                data.features.forEach((feature) => {
-                    const distance = feature.properties.transport_distance;
+                // Debugging - log the first few distance values
+                console.log(
+                    "First 10 distance values:",
+                    geoJsonData.features.slice(0, 10).map(
+                        (f) => f.properties.transit_distance // Changed from transport_distance to transit_distance
+                    )
+                );
+
+                // Make sure transit_distance is a number
+                geoJsonData.features.forEach((feature) => {
+                    // Changed from transport_distance to transit_distance
+                    const distance = parseFloat(
+                        feature.properties.transit_distance
+                    );
+
+                    // Skip invalid values
+                    if (isNaN(distance)) return;
+
                     if (distance < 100) distanceBuckets["< 100m"]++;
                     else if (distance < 300) distanceBuckets["100-300m"]++;
                     else if (distance < 600) distanceBuckets["300-600m"]++;
                     else if (distance < 1000) distanceBuckets["600-1000m"]++;
                     else distanceBuckets["> 1000m"]++;
                 });
+
+                // Log the final counts for debugging
+                console.log("Distance bucket counts:", distanceBuckets);
 
                 // Create chart
                 if (window.transitChart) window.transitChart.destroy();
@@ -1252,8 +1226,12 @@
             }
 
             // Create mode distribution chart
-            function createModeChart(data) {
-                if (!data || !data.features || data.features.length === 0)
+            function createModeChart() {
+                if (
+                    !geoJsonData ||
+                    !geoJsonData.features ||
+                    geoJsonData.features.length === 0
+                )
                     return;
 
                 const canvas = document.getElementById("mode-chart");
@@ -1268,7 +1246,7 @@
                     "4+ modes": 0,
                 };
 
-                data.features.forEach((feature) => {
+                geoJsonData.features.forEach((feature) => {
                     const modes = feature.properties.transport_modes;
                     if (modes === 0) modeBuckets["No transit"]++;
                     else if (modes === 1) modeBuckets["1 mode"]++;
@@ -1309,11 +1287,11 @@
             }
 
             // Create age distribution chart
-            function createAgeChart(ageData) {
+            function createAgeChart() {
                 const canvas = document.getElementById("age-chart");
                 const ctx = canvas.getContext("2d");
 
-                if (!ageData || ageData.length === 0) {
+                if (!ageDistributionData || ageDistributionData.length === 0) {
                     if (window.ageChart) window.ageChart.destroy();
                     return;
                 }
@@ -1332,7 +1310,7 @@
                     "Unknown",
                 ];
 
-                const sortedData = [...ageData].sort((a, b) => {
+                const sortedData = [...ageDistributionData].sort((a, b) => {
                     return (
                         periodOrder.indexOf(a.age_period) -
                         periodOrder.indexOf(b.age_period)
@@ -1417,18 +1395,7 @@
                     .getElementById("show-age")
                     .addEventListener("change", toggleBuildingAge);
 
-                // Heatmap radius slider
-                document
-                    .getElementById("heatmap-radius")
-                    .addEventListener("input", function (e) {
-                        document.getElementById("radius-value").textContent =
-                            e.target.value;
-                        if (currentMode === "age") {
-                            renderBuildingAgeHeatmap();
-                        } else {
-                            renderHeatmap();
-                        }
-                    });
+                // Removed dot radius slider event listener
             }
         </script>
     </body>
