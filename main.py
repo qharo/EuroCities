@@ -473,7 +473,7 @@ class CustomJSONEncoder(json.JSONEncoder):
         return super().default(obj)
 
 def main():
-    city_name = "Paris, France"
+    city_name = "Munich, Germany"
     output_prefix = city_name.split(',')[0].lower()
     
     try:
