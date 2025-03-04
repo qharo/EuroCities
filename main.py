@@ -1,387 +1,595 @@
+import osmnx as ox
+import pandas as pd
+import numpy as np
 from pyspark.sql import SparkSession
-from pyspark.sql.functions import col, explode, expr, udf, struct, lit, array
-from pyspark.sql.types import StructType, StructField, StringType, IntegerType, DoubleType, ArrayType, MapType, BooleanType
-import xml.etree.ElementTree as ET
-import os
+from pyspark.sql import functions as F
+from pyspark.sql.functions import col, lit, sqrt, pow, when, udf
+from pyspark.sql.types import IntegerType, FloatType, StringType, StructType, StructField
+import time
+import json
+import logging
+import datetime
 
-# Initialize Spark Session
+# Set up logging
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
+
+# Create Spark session
 spark = SparkSession.builder \
-    .appName("OSM France Analysis") \
-    .config("spark.driver.memory", "8g") \
-    .config("spark.executor.memory", "8g") \
+    .appName("Urban Accessibility") \
+    .config("spark.sql.execution.arrow.pyspark.enabled", "true") \
+    .config("spark.sql.shuffle.partitions", "4") \
+    .config("spark.driver.memory", "4g") \
     .getOrCreate()
 
-# Define schema for OSM XML elements
-osm_node_schema = StructType([
-    StructField("id", StringType(), True),
-    StructField("type", StringType(), True),
-    StructField("lat", DoubleType(), True),
-    StructField("lon", DoubleType(), True),
-    StructField("tags", MapType(StringType(), StringType()), True)
-])
+# spark.sparkContext.setLogLevel("INFO")
 
-osm_way_schema = StructType([
-    StructField("id", StringType(), True),
-    StructField("type", StringType(), True),
-    StructField("tags", MapType(StringType(), StringType()), True),
-    StructField("nodes", ArrayType(StringType()), True)
-])
-
-osm_relation_schema = StructType([
-    StructField("id", StringType(), True),
-    StructField("type", StringType(), True),
-    StructField("tags", MapType(StringType(), StringType()), True),
-    StructField("members", ArrayType(
-        StructType([
-            StructField("type", StringType(), True),
-            StructField("ref", StringType(), True),
-            StructField("role", StringType(), True)
-        ])
-    ), True)
-])
-
-def parse_osm_chunk(xml_chunk):
-    """Parse an OSM XML chunk and extract elements"""
+def fetch_city_data(city_name):
+    """Fetch buildings, transport, and green space data from OpenStreetMap."""
+    # Fetch buildings with additional attributes including year
     try:
-        # Parse the XML chunk
-        root = ET.fromstring(xml_chunk)
-        elements = []
+        buildings = ox.features_from_place(city_name, tags={"building": True}).to_crs(2154)
+        print(f"Successfully fetched {len(buildings)} buildings")
         
-        # Process nodes
-        for node in root.findall(".//node"):
-            node_id = node.get("id")
-            lat = float(node.get("lat")) if node.get("lat") else None
-            lon = float(node.get("lon")) if node.get("lon") else None
-            
-            # Extract tags
-            tags = {}
-            for tag in node.findall("tag"):
-                k = tag.get("k")
-                v = tag.get("v")
-                if k and v:
-                    tags[k] = v
-            
-            # Check if it's a city/town with population
-            if 'place' in tags and tags['place'] in ['city', 'town'] and 'population' in tags:
-                try:
-                    population = int(tags['population'])
-                    if population > 100000:
-                        elements.append({
-                            "id": node_id,
-                            "type": "node",
-                            "lat": lat,
-                            "lon": lon,
-                            "tags": tags
-                        })
-                except ValueError:
-                    pass
-        
-        # Process ways (for buildings)
-        for way in root.findall(".//way"):
-            way_id = way.get("id")
-            
-            # Extract tags
-            tags = {}
-            for tag in way.findall("tag"):
-                k = tag.get("k")
-                v = tag.get("v")
-                if k and v:
-                    tags[k] = v
-            
-            # Extract nodes
-            nodes = []
-            for nd in way.findall("nd"):
-                ref = nd.get("ref")
-                if ref:
-                    nodes.append(ref)
-            
-            # Check if it's a building
-            if 'building' in tags:
-                elements.append({
-                    "id": way_id,
-                    "type": "way",
-                    "tags": tags,
-                    "nodes": nodes
-                })
-        
-        # Process relations (for administrative boundaries)
-        for relation in root.findall(".//relation"):
-            relation_id = relation.get("id")
-            
-            # Extract tags
-            tags = {}
-            for tag in relation.findall("tag"):
-                k = tag.get("k")
-                v = tag.get("v")
-                if k and v:
-                    tags[k] = v
-            
-            # Extract members
-            members = []
-            for member in relation.findall("member"):
-                member_type = member.get("type")
-                ref = member.get("ref")
-                role = member.get("role")
-                if member_type and ref:
-                    members.append({
-                        "type": member_type,
-                        "ref": ref,
-                        "role": role or ""
-                    })
-            
-            # Check if it's a city/town with population
-            if 'place' in tags and tags['place'] in ['city', 'town'] and 'population' in tags:
-                try:
-                    population = int(tags['population'])
-                    if population > 100000:
-                        elements.append({
-                            "id": relation_id,
-                            "type": "relation",
-                            "tags": tags,
-                            "members": members
-                        })
-                except ValueError:
-                    pass
-            
-            # Also check if it's an administrative boundary that might contain a city
-            if 'boundary' in tags and tags['boundary'] == 'administrative' and 'name' in tags:
-                elements.append({
-                    "id": relation_id,
-                    "type": "relation",
-                    "tags": tags,
-                    "members": members
-                })
-                
-        return elements
+        # Debug information about the data structure
+        print("Building data columns:", buildings.columns.tolist())
+        if len(buildings) > 0:
+            sample_row = buildings.iloc[0]
+            print("Sample building data structure:")
+            for col in buildings.columns:
+                print(f"  {col}: {type(sample_row[col])}")
     except Exception as e:
-        print(f"Error parsing XML chunk: {e}")
-        return []
+        print(f"Error fetching buildings: {str(e)}")
+        buildings = pd.DataFrame()
+    
+    # Fetch transport nodes
+    transport_modes = {
+        "bus": {"highway": "bus_stop"},
+        "train": {"railway": "station"},
+        "tram": {"railway": "tram_stop"},
+        "subway": {"railway": "subway_entrance"},
+    }
+    transport_data = []
+    
+    for mode, tags in transport_modes.items():
+        try:
+            logger.info(f"Fetching {mode} stops")
+            gdf = ox.features_from_place(city_name, tags)
+            if not gdf.empty:
+                gdf = gdf.to_crs(2154).assign(transport_mode=mode)
+                transport_data.append(gdf)
+                print(f"Found {len(gdf)} {mode} stops")
+            else:
+                print(f"No {mode} stops found")
+        except Exception as e:
+            print(f"Failed to fetch {mode} stops: {str(e)}")
+    
+    transport_stops = pd.concat(transport_data) if transport_data else pd.DataFrame()
+    
+    # Fetch green spaces
+    try:
+        green_spaces = ox.features_from_place(city_name, tags={"landuse": ["park", "forest", "recreation_ground", "meadow"]})
+        green_spaces = pd.concat([green_spaces, 
+                               ox.features_from_place(city_name, tags={"leisure": ["park", "garden"]})]) if not green_spaces.empty else \
+                      ox.features_from_place(city_name, tags={"leisure": ["park", "garden"]})
+        green_spaces = green_spaces.to_crs(2154)
+        print(f"Found {len(green_spaces)} green spaces")
+    except Exception as e:
+        print(f"Failed to fetch green spaces: {str(e)}")
+        green_spaces = pd.DataFrame()
+    
+    # Fetch street network
+    try:
+        streets = ox.graph_from_place(city_name)
+        streets_gdf = ox.graph_to_gdfs(streets, nodes=False, edges=True)
+        streets_gdf = streets_gdf.to_crs(2154)
+        print(f"Found {len(streets_gdf)} street segments")
+    except Exception as e:
+        print(f"Failed to fetch streets: {str(e)}")
+        streets_gdf = pd.DataFrame()
+    
+    return buildings, transport_stops, green_spaces, streets_gdf
 
-def convert_pbf_to_xml_chunks(pbf_file, output_dir="osm_chunks", chunk_size=1000000):
-    """
-    Convert OSM PBF to XML chunks using osmconvert
-    This requires osmconvert to be installed: https://wiki.openstreetmap.org/wiki/Osmconvert
+def parse_year(year_str):
+    """Parse year from OSM tags, handling various formats."""
+    if pd.isna(year_str):
+        return None
     
-    For now, this is a placeholder. In a real implementation, you would:
-    1. Use subprocess to call osmconvert to convert PBF to XML
-    2. Split the XML file into manageable chunks
+    try:
+        # Try to parse as integer
+        year = int(year_str)
+        # Basic validation (buildings unlikely before 1000 CE, and not in the future)
+        current_year = datetime.datetime.now().year
+        if 1000 <= year <= current_year:
+            return year
+    except (ValueError, TypeError):
+        # Try to extract year from more complex formats
+        try:
+            # Look for 4-digit patterns that could be years
+            import re
+            year_match = re.search(r'\b(1\d{3}|20\d{2})\b', str(year_str))
+            if year_match:
+                year = int(year_match.group(1))
+                current_year = datetime.datetime.now().year
+                if 1000 <= year <= current_year:
+                    return year
+        except:
+            pass
     
-    For simplicity in this example, we assume the XML chunks already exist
-    """
-    print(f"Converting {pbf_file} to XML chunks in {output_dir}")
-    print("In a real implementation, this would use osmconvert")
-    
-    # Return a list of chunk file paths (placeholder)
-    return [f"{output_dir}/chunk_{i}.osm" for i in range(1, 10)]
+    return None
 
-def process_osm_data(osm_file_path):
-    """
-    Process OSM PBF file and filter for cities with population > 500,000
+def prepare_dataframes(buildings, transport_stops, green_spaces, streets):
+    """Extract and prepare data for analysis."""
+    # Extract year built information
+    years = []
     
-    Note: In a real implementation, you would first convert the PBF to XML chunks
-    """
-    print(f"Processing OSM file: {osm_file_path}")
+    if len(buildings) == 0:
+        print("No building data available")
+        return pd.DataFrame(), pd.DataFrame(), pd.DataFrame(), pd.DataFrame()
     
-    # Process the XML chunks to extract cities
-    # In a real implementation, we would:
-    # 1. Convert PBF to XML chunks using osmconvert
-    # 2. Process each XML chunk
-    # For now, we'll create a sample DataFrame
+    # Try multiple approaches to extract year information
+    try:
+        for i, building in buildings.iterrows():
+            year = None
+            
+            # Approach 1: Check if building has a tags attribute that's a dictionary
+            if hasattr(building, 'tags') and isinstance(building.tags, dict):
+                for tag in ['start_date', 'year_built', 'year', 'construction:date', 'built']:
+                    if tag in building.tags and building.tags[tag]:
+                        year = parse_year(building.tags[tag])
+                        if year:
+                            break
+            
+            # Approach 2: Check if tags is a column in the dataframe
+            elif 'tags' in buildings.columns:
+                tags = building['tags']
+                # Handle different formats of tags
+                if isinstance(tags, dict):
+                    tag_dict = tags
+                elif isinstance(tags, str):
+                    try:
+                        tag_dict = eval(tags)  # Convert string to dict if possible
+                    except:
+                        tag_dict = {}
+                else:
+                    tag_dict = {}
+                
+                for tag in ['start_date', 'year_built', 'year', 'construction:date', 'built']:
+                    if tag in tag_dict and tag_dict[tag]:
+                        year = parse_year(tag_dict[tag])
+                        if year:
+                            break
+            
+            # Approach 3: Check if year-related columns exist directly
+            else:
+                for tag in ['start_date', 'year_built', 'year', 'construction:date', 'built']:
+                    if tag in buildings.columns and pd.notna(building[tag]):
+                        year = parse_year(building[tag])
+                        if year:
+                            break
+            
+            years.append(year)
+    except Exception as e:
+        print(f"Error extracting year data: {str(e)}")
+        years = [None] * len(buildings)
     
-    # Sample data for demonstration (in a real implementation, this would come from parsing XML)
-    sample_cities = [
-        {
-            "id": "1234567",
-            "type": "node",
-            "lat": 48.8566,
-            "lon": 2.3522,
-            "tags": {"name": "Paris", "place": "city", "population": "2187526", "admin_level": "8"}
-        },
-        {
-            "id": "7654321",
-            "type": "node",
-            "lat": 43.2965,
-            "lon": 5.3698,
-            "tags": {"name": "Marseille", "place": "city", "population": "870018", "admin_level": "8"}
-        },
-        {
-            "id": "9876543",
-            "type": "node",
-            "lat": 45.7578,
-            "lon": 4.8320,
-            "tags": {"name": "Lyon", "place": "city", "population": "518635", "admin_level": "8"}
-        }
-    ]
+    # Calculate building areas
+    building_areas = buildings.geometry.area
     
-    # Create a DataFrame from the sample data
-    cities_df = spark.createDataFrame(sample_cities, schema=osm_node_schema)
+    # Prepare buildings dataframe
+    buildings_simple = pd.DataFrame({
+        'building_id': [f"building_{i}" for i in range(len(buildings))],
+        'bldg_x': buildings.geometry.centroid.x,
+        'bldg_y': buildings.geometry.centroid.y,
+        'building_area': building_areas,
+        'year_built': years
+    }).dropna(subset=['bldg_x', 'bldg_y'])  # Only drop rows with missing coordinates
     
-    # Extract population as integer
-    @udf(IntegerType())
-    def extract_population(tags):
-        if tags and 'population' in tags:
-            try:
-                return int(tags['population'])
-            except ValueError:
-                return None
-        return None
+    # Prepare transport dataframe
+    transport_simple = pd.DataFrame()
+    if not transport_stops.empty:
+        transport_simple = pd.DataFrame({
+            'stop_id': [f"stop_{i}" for i in range(len(transport_stops))],
+            'transport_mode': transport_stops['transport_mode'],
+            'stop_x': transport_stops.geometry.centroid.x,
+            'stop_y': transport_stops.geometry.centroid.y
+        }).dropna(subset=['stop_x', 'stop_y'])
     
-    # Extract name as string
-    @udf(StringType())
-    def extract_name(tags):
-        if tags and 'name' in tags:
-            return tags['name']
-        return None
+    # Prepare green spaces dataframe
+    green_simple = pd.DataFrame()
+    if not green_spaces.empty:
+        green_simple = pd.DataFrame({
+            'green_id': [f"green_{i}" for i in range(len(green_spaces))],
+            'green_area': green_spaces.geometry.area,
+            'green_x': green_spaces.geometry.centroid.x,
+            'green_y': green_spaces.geometry.centroid.y
+        }).dropna(subset=['green_x', 'green_y'])
     
-    # Extract admin level
-    @udf(StringType())
-    def extract_admin_level(tags):
-        if tags and 'admin_level' in tags:
-            return tags['admin_level']
-        return None
+    # Prepare streets dataframe
+    streets_simple = pd.DataFrame()
+    if not streets.empty:
+        streets_simple = pd.DataFrame({
+            'street_id': [f"street_{i}" for i in range(len(streets))],
+            'street_length': streets.geometry.length,
+            'street_width': streets.apply(lambda x: float(x.get('width', 5)) if x.get('width') and str(x.get('width')).replace('.', '', 1).isdigit() else 5, axis=1)
+        })
     
-    # Apply UDFs and filter by population
-    cities_df = cities_df.withColumn("population", extract_population(col("tags"))) \
-                       .withColumn("name", extract_name(col("tags"))) \
-                       .withColumn("admin_level", extract_admin_level(col("tags"))) \
-                       .filter(col("population") > 100000)
-    
-    return cities_df
+    return buildings_simple, transport_simple, green_simple, streets_simple
 
-def extract_buildings(osm_file_path):
-    """
-    Extract buildings from OSM data
+def calculate_accessibility(buildings_df, transport_df, max_distance=5000):
+    """Calculate transport accessibility metrics."""
+    if transport_df.count() == 0:
+        logger.warning("No transport stops found. Creating dummy results.")
+        return buildings_df.withColumn("nearest_distance", F.lit(float('inf'))) \
+                          .withColumn("nearby_modes", F.lit(0))
     
-    Note: In a real implementation, you would process XML chunks
-    """
-    print(f"Extracting buildings from: {osm_file_path}")
+    joined_df = buildings_df.crossJoin(transport_df) \
+        .withColumn("distance", 
+                    sqrt(pow(buildings_df.bldg_x - transport_df.stop_x, 2) + 
+                         pow(buildings_df.bldg_y - transport_df.stop_y, 2)))
     
-    # Sample data for demonstration
-    sample_buildings = [
-        {
-            "id": "12345",
-            "type": "way",
-            "tags": {"building": "yes", "building:levels": "5", "height": "15", "name": "Sample Building 1"},
-            "nodes": ["1", "2", "3", "4", "1"]
-        },
-        {
-            "id": "23456",
-            "type": "way",
-            "tags": {"building": "residential", "building:levels": "10", "height": "30"},
-            "nodes": ["5", "6", "7", "8", "5"]
-        },
-        {
-            "id": "34567",
-            "type": "way",
-            "tags": {"building": "commercial", "building:levels": "20", "height": "60", "name": "Office Tower"},
-            "nodes": ["9", "10", "11", "12", "9"]
-        }
-    ]
+    filtered_df = joined_df.filter(joined_df.distance <= max_distance)
     
-    # Create a DataFrame from the sample data
-    buildings_df = spark.createDataFrame(sample_buildings, schema=osm_way_schema)
+    min_distances = filtered_df.groupBy("building_id", "bldg_x", "bldg_y", "building_area", "year_built") \
+        .agg(F.min("distance").alias("nearest_distance"))
     
-    # Extract building attributes
-    @udf(StringType())
-    def extract_building_type(tags):
-        if tags and 'building' in tags:
-            return tags['building']
-        return None
+    modes_df = filtered_df.filter(filtered_df.distance <= 100) \
+        .groupBy("building_id") \
+        .agg(F.countDistinct("transport_mode").alias("nearby_modes"))
     
-    @udf(IntegerType())
-    def extract_levels(tags):
-        if tags and 'building:levels' in tags:
-            try:
-                return int(tags['building:levels'])
-            except ValueError:
-                return None
-        return None
+    # Join and handle missing values, but use 0 instead of None for year_built
+    result = min_distances.join(modes_df, "building_id", "left_outer") \
+        .fillna(0, subset=["nearby_modes"])
     
-    @udf(DoubleType())
-    def extract_height(tags):
-        if tags and 'height' in tags:
-            try:
-                return float(tags['height'])
-            except ValueError:
-                return None
-        return None
-    
-    @udf(StringType())
-    def extract_name(tags):
-        if tags and 'name' in tags:
-            return tags['name']
-        return None
-    
-    # Apply UDFs
-    buildings_df = buildings_df.withColumn("building_type", extract_building_type(col("tags"))) \
-                              .withColumn("levels", extract_levels(col("tags"))) \
-                              .withColumn("height", extract_height(col("tags"))) \
-                              .withColumn("name", extract_name(col("tags")))
-    
-    return buildings_df
+    return result
 
-def calculate_building_metrics(buildings_df):
-    """
-    Calculate metrics for buildings
-    """
-    # Count buildings by type
-    building_counts = buildings_df.groupBy("building_type").count()
+def calculate_green_accessibility(buildings_df, green_df, max_distance=1000):
+    """Calculate green space accessibility metrics."""
+    if green_df.count() == 0:
+        logger.warning("No green spaces found. Creating dummy results.")
+        return buildings_df.withColumn("nearest_green_distance", F.lit(float('inf'))) \
+                          .withColumn("nearby_green_area", F.lit(0))
     
-    # Calculate average levels and height by building type
-    building_stats = buildings_df.groupBy("building_type") \
-                                .agg(
-                                    {"levels": "avg", "height": "avg", "id": "count"}
-                                ) \
-                                .withColumnRenamed("avg(levels)", "avg_levels") \
-                                .withColumnRenamed("avg(height)", "avg_height") \
-                                .withColumnRenamed("count(id)", "count")
+    joined_df = buildings_df.crossJoin(green_df) \
+        .withColumn("green_distance", 
+                    sqrt(pow(buildings_df.bldg_x - green_df.green_x, 2) + 
+                         pow(buildings_df.bldg_y - green_df.green_y, 2)))
     
-    return building_stats
+    filtered_df = joined_df.filter(joined_df.green_distance <= max_distance)
+    
+    min_distances = filtered_df.groupBy("building_id") \
+        .agg(F.min("green_distance").alias("nearest_green_distance"))
+    
+    nearby_green = filtered_df.filter(filtered_df.green_distance <= 500) \
+        .groupBy("building_id") \
+        .agg(F.sum("green_area").alias("nearby_green_area"))
+    
+    result = min_distances.join(nearby_green, "building_id", "left_outer") \
+        .fillna(0, subset=["nearby_green_area"])
+    
+    return result
 
-# Main execution
+def calculate_building_age_distribution(buildings_df):
+    """Calculate building age distribution."""
+    # Check if year_built column exists
+    has_year_column = "year_built" in buildings_df.columns
+    
+    if not has_year_column:
+        logger.warning("No year_built column found in the data.")
+        schema = StructType([
+            StructField("period", StringType(), True),
+            StructField("count", IntegerType(), True),
+            StructField("percentage", FloatType(), True)
+        ])
+        return spark.createDataFrame([], schema)
+    
+    # Filter out buildings with no year data
+    buildings_with_year = buildings_df.filter(col("year_built").isNotNull() & (~F.isnan(col("year_built"))))
+    
+    # If no buildings have year data, return empty dataframe
+    if buildings_with_year.count() == 0:
+        logger.warning("No buildings with valid year data found.")
+        schema = StructType([
+            StructField("period", StringType(), True),
+            StructField("count", IntegerType(), True),
+            StructField("percentage", FloatType(), True)
+        ])
+        return spark.createDataFrame([], schema)
+    
+    # Define age periods
+    current_year = datetime.datetime.now().year
+    
+    @udf(returnType=StringType())
+    def get_age_period(year):
+        if year is None or pd.isna(year) or year == 0:
+            return "Unknown"
+        
+        try:
+            year_int = int(year)
+            if year_int < 1800:
+                return "Pre-1800"
+            elif year_int < 1850:
+                return "1800-1849"
+            elif year_int < 1900:
+                return "1850-1899"
+            elif year_int < 1945:
+                return "1900-1944"
+            elif year_int < 1970:
+                return "1945-1969"
+            elif year_int < 1990:
+                return "1970-1989"
+            elif year_int < 2000:
+                return "1990-1999"
+            elif year_int < 2010:
+                return "2000-2009"
+            else:
+                return "2010-present"
+        except (ValueError, TypeError):
+            return "Unknown"
+    
+    # Calculate distribution
+    age_distribution = buildings_df.withColumn("age_period", get_age_period(col("year_built")))
+    
+    # Count buildings by period
+    period_counts = age_distribution.groupBy("age_period").count()
+    
+    # Calculate percentages
+    total_buildings = buildings_df.count()
+    distribution = period_counts.withColumn(
+        "percentage", 
+        (col("count") / total_buildings * 100).cast(FloatType())
+    ).orderBy("age_period")
+    
+    return distribution
+
+def calculate_city_metrics(buildings_df, transport_df, green_df, streets_df):
+    """Calculate overall city-level metrics."""
+    city_metrics = {}
+    
+    # Total building count and average area
+    total_buildings = buildings_df.count()
+    avg_building_area = buildings_df.agg(F.avg("building_area")).collect()[0][0]
+    city_metrics["total_buildings"] = total_buildings
+    city_metrics["avg_building_area"] = float(avg_building_area) if avg_building_area else 0
+    
+    # Transport metrics
+    if transport_df.count() > 0:
+        avg_distance = buildings_df.agg(F.avg("nearest_distance")).collect()[0][0]
+        city_metrics["avg_transport_distance"] = float(avg_distance) if avg_distance else float('inf')
+        
+        # Transport mode distribution
+        mode_counts = transport_df.groupBy("transport_mode").count()
+        city_metrics["transport_mode_distribution"] = {row["transport_mode"]: row["count"] for row in mode_counts.collect()}
+        
+        # Transit accessibility percentage (buildings within 600m of transit)
+        buildings_near_transit = buildings_df.filter(col("nearby_modes") > 0).count()
+        city_metrics["transit_accessibility_pct"] = (buildings_near_transit / total_buildings * 100) if total_buildings > 0 else 0
+    else:
+        city_metrics["avg_transport_distance"] = float('inf')
+        city_metrics["transport_mode_distribution"] = {}
+        city_metrics["transit_accessibility_pct"] = 0
+    
+    # Green space metrics
+    if green_df.count() > 0 and "nearby_green_area" in buildings_df.columns:
+        total_green_area = green_df.agg(F.sum("green_area")).collect()[0][0]
+        city_area = (buildings_df.agg(F.max("bldg_x") - F.min("bldg_x")).collect()[0][0] * 
+                    buildings_df.agg(F.max("bldg_y") - F.min("bldg_y")).collect()[0][0])
+        
+        city_metrics["total_green_area"] = float(total_green_area) if total_green_area else 0
+        city_metrics["green_space_ratio"] = float(total_green_area / city_area) if total_green_area and city_area else 0
+        
+        # Green accessibility percentage (buildings within 500m of green space)
+        buildings_near_green = buildings_df.filter(col("nearby_green_area") > 0).count()
+        city_metrics["green_accessibility_pct"] = (buildings_near_green / total_buildings * 100) if total_buildings > 0 else 0
+    else:
+        city_metrics["total_green_area"] = 0
+        city_metrics["green_space_ratio"] = 0
+        city_metrics["green_accessibility_pct"] = 0
+    
+    # Building-to-street ratio if street data available
+    if streets_df.count() > 0:
+        total_street_area = streets_df.agg(F.sum(col("street_length") * col("street_width"))).collect()[0][0]
+        total_building_area = buildings_df.agg(F.sum("building_area")).collect()[0][0]
+        
+        city_metrics["building_to_street_ratio"] = float(total_building_area / total_street_area) if total_building_area and total_street_area else 0
+    else:
+        city_metrics["building_to_street_ratio"] = 0
+    
+    # Building age metrics if available
+    if "year_built" in buildings_df.columns:
+        buildings_with_year = buildings_df.filter(col("year_built").isNotNull() & (col("year_built") > 0)).count()
+        if buildings_with_year > 0:
+            avg_year = buildings_df.filter(col("year_built") > 0).agg(F.avg("year_built")).collect()[0][0]
+            median_year = buildings_df.filter(col("year_built") > 0).approxQuantile("year_built", [0.5], 0.05)[0]
+            oldest_year = buildings_df.filter(col("year_built") > 0).agg(F.min("year_built")).collect()[0][0]
+            newest_year = buildings_df.filter(col("year_built") > 0).agg(F.max("year_built")).collect()[0][0]
+            
+            city_metrics["buildings_with_year_data_pct"] = (buildings_with_year / total_buildings * 100) if total_buildings > 0 else 0
+            city_metrics["avg_building_year"] = float(avg_year) if avg_year else None
+            city_metrics["median_building_year"] = float(median_year) if median_year else None
+            city_metrics["oldest_building_year"] = float(oldest_year) if oldest_year else None
+            city_metrics["newest_building_year"] = float(newest_year) if newest_year else None
+        else:
+            city_metrics["buildings_with_year_data_pct"] = 0
+            city_metrics["avg_building_year"] = None
+            city_metrics["median_building_year"] = None
+            city_metrics["oldest_building_year"] = None
+            city_metrics["newest_building_year"] = None
+    
+    return city_metrics
+
+def create_geojson(results_df):
+    """Create GeoJSON from building results with all available metrics."""
+    # Get all available columns
+    all_columns = results_df.columns
+    
+    # Define which columns to include in properties
+    property_columns = [col for col in all_columns if col not in ['building_id', 'bldg_x', 'bldg_y']]
+    
+    # Create a dynamically built struct for properties
+    struct_fields = []
+    
+    # Add building_id as id
+    struct_fields.append(col("building_id").alias("id"))
+    
+    # Add all other columns with appropriate renaming
+    for column in property_columns:
+        # Apply special handling for specific columns
+        if column == "nearest_distance":
+            struct_fields.append(col(column).alias("transit_distance"))
+        elif column == "nearby_modes":
+            struct_fields.append(col(column).alias("transit_modes"))
+        elif column == "nearest_green_distance":
+            struct_fields.append(
+                F.when(col(column).isNotNull(), col(column)).otherwise(lit(float('inf'))).alias("green_distance")
+            )
+        else:
+            # Keep original name for other columns
+            struct_fields.append(col(column))
+    
+    # Select all metrics for each building
+    features_df = results_df.select(
+        lit("Feature").alias("type"),
+        F.struct(
+            lit("Point").alias("type"),
+            F.array(col("bldg_x"), col("bldg_y")).alias("coordinates")
+        ).alias("geometry"),
+        F.struct(*struct_fields).alias("properties")
+    )
+    
+    features = features_df.collect()
+    geojson = {"type": "FeatureCollection", "features": [row.asDict(recursive=True) for row in features]}
+    
+    return geojson
+
+import math
+class CustomJSONEncoder(json.JSONEncoder):
+    def default(self, obj):
+        if isinstance(obj, float):
+            if math.isnan(obj):
+                return None  # Convert NaN to null in JSON
+            if math.isinf(obj):
+                return None  # Convert infinity to null as well
+        return super().default(obj)
+
+def main():
+    city_name = "Paris, France"
+    output_prefix = city_name.split(',')[0].lower()
+    
+    try:
+        # Data preparation
+        logger.info(f"Fetching data for {city_name}")
+        buildings, transport_stops, green_spaces, streets = fetch_city_data(city_name)
+        
+        # Check if we have building data
+        if len(buildings) == 0:
+            logger.error("No building data was retrieved. Exiting.")
+            return
+            
+        buildings_simple, transport_simple, green_simple, streets_simple = prepare_dataframes(
+            buildings, transport_stops, green_spaces, streets
+        )
+        
+        # Check if data preparation was successful
+        if len(buildings_simple) == 0:
+            logger.error("Building data preparation failed. Exiting.")
+            return
+            
+        # Log the schema of the prepared dataframes
+        print(f"Buildings dataframe columns: {buildings_simple.columns.tolist()}")
+        print(f"Transport dataframe columns: {transport_simple.columns.tolist() if not transport_simple.empty else []}")
+        
+        # Create Spark dataframes with error handling
+        try:
+            buildings_df = spark.createDataFrame(buildings_simple).cache()
+            
+            transport_df = spark.createDataFrame(transport_simple) if not transport_simple.empty else \
+                          spark.createDataFrame([], schema="stop_id string, transport_mode string, stop_x double, stop_y double")
+            transport_df.cache()
+            
+            green_df = spark.createDataFrame(green_simple) if not green_simple.empty else \
+                      spark.createDataFrame([], schema="green_id string, green_area double, green_x double, green_y double")
+            green_df.cache()
+            
+            streets_df = spark.createDataFrame(streets_simple) if not streets_simple.empty else \
+                        spark.createDataFrame([], schema="street_id string, street_length double, street_width double")
+            streets_df.cache()
+        except Exception as e:
+            logger.error(f"Error creating Spark dataframes: {str(e)}")
+            return
+        
+        # Calculate accessibility metrics
+        logger.info("Calculating transport accessibility")
+        transport_results = calculate_accessibility(buildings_df, transport_df)
+        transport_results.cache()
+        
+        # Calculate green space accessibility
+        logger.info("Calculating green space accessibility")
+        green_results = calculate_green_accessibility(buildings_df, green_df)
+        green_results.cache()
+        
+        # Join all results together
+        results = transport_results.join(
+            green_results, "building_id", "left_outer"
+        )
+        results.cache()
+        
+        # Calculate city-level metrics
+        logger.info("Calculating city-level metrics")
+        city_metrics = calculate_city_metrics(results, transport_df, green_df, streets_df)
+        
+        # Calculate building age distribution for city metrics - with error handling
+        logger.info("Calculating building age distribution")
+        try:
+            age_distribution = calculate_building_age_distribution(results)
+            age_distribution_data = age_distribution.collect()
+            # Add age distribution to city metrics
+            city_metrics["building_age_distribution"] = [row.asDict() for row in age_distribution_data]
+        except Exception as e:
+            logger.warning(f"Error calculating building age distribution: {str(e)}")
+            city_metrics["building_age_distribution"] = []
+        
+        # Create GeoJSON output (building-level data)
+        logger.info("Creating GeoJSON output")
+        geojson = create_geojson(results)
+        
+        # Save output files
+        logger.info("Saving output files")
+        
+        # 1. Main GeoJSON file with building-level metrics
+        with open(f"{output_prefix}.geojson", "w") as f:
+            json.dump(geojson, f)
+            print(f"Saved building-level metrics to {output_prefix}.geojson")
+        
+        # 2. City-level metrics JSON file
+        with open(f"{output_prefix}_city_metrics.json", "w") as f:
+            json.dump(city_metrics, f, cls=CustomJSONEncoder)
+            print(f"Saved city-level metrics to {output_prefix}_city_metrics.json")
+        
+        # Print summary of outputs
+        print(f"\nAnalysis complete for {city_name}")
+        print(f"Analyzed {results.count()} buildings")
+        print(f"Found {transport_df.count()} transit stops and {green_df.count()} green spaces")
+        
+        # Print a few key city metrics
+        print("\nKey City Metrics:")
+        metrics_to_show = [
+            "avg_transport_distance", 
+            "transit_accessibility_pct",
+            "green_accessibility_pct", 
+            "building_to_street_ratio"
+        ]
+        for metric in metrics_to_show:
+            if metric in city_metrics:
+                print(f"  {metric}: {city_metrics[metric]}")
+        
+        spark.stop()
+        
+    except Exception as e:
+        logger.error(f"Error in main execution: {str(e)}")
+        import traceback
+        traceback.print_exc()
+        spark.stop()
+
 if __name__ == "__main__":
-    # Path to the OSM PBF file
-    osm_file = "france-latest.osm.pbf"
-    
-    # Process OSM data to extract large cities
-    large_cities_df = process_osm_data(osm_file)
-    
-    print("Cities with population > 500,000:")
-    large_cities_df.select("id", "name", "population", "admin_level").show()
-    
-    # Flatten DataFrame for CSV export (remove complex types)
-    cities_for_export = large_cities_df.select(
-        "id", "type", "lat", "lon", "name", "population", "admin_level"
-    )
-    
-    # Save cities to CSV
-    cities_for_export.write.csv("large_cities_france.csv", header=True, mode="overwrite")
-    
-    # Extract buildings from OSM data
-    buildings_df = extract_buildings(osm_file)
-    
-    print("Building sample:")
-    buildings_df.select("id", "building_type", "levels", "height").show(5)
-    
-    # Calculate building metrics
-    building_metrics = calculate_building_metrics(buildings_df)
-    
-    print("Building metrics:")
-    building_metrics.show()
-    
-    # Ensure building metrics don't have complex types before saving
-    building_metrics_export = building_metrics.select(
-        "building_type", "count", "avg_levels", "avg_height"
-    )
-    
-    # Save building metrics to CSV
-    building_metrics_export.write.csv("building_metrics_france.csv", header=True, mode="overwrite")
-    
-    spark.stop()
-
-# Instructions for using this code with a real OSM PBF file:
-# 1. Install osmconvert: https://wiki.openstreetmap.org/wiki/Osmconvert
-# 2. Convert PBF to OSM XML: osmconvert france-latest.osm.pbf -o=france.osm
-# 3. Split the XML file into manageable chunks (e.g., using split command)
-# 4. Update the code to process these XML chunks
-# 5. Run with: spark-submit --driver-memory 8g --executor-memory 8g script.py
+    main()

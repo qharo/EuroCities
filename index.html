@@ -207,15 +207,24 @@
                 },
                 {
                     name: "Lyon",
-                    geojsonUrl: "lyon.geojson",
-                    metricsUrl: "lyon_city_metrics.json",
+                    geojsonUrl:
+                        "https://raw.githubusercontent.com/qharo/EuroCities/main/Cities/Lyon/lyon.geojson",
+                    metricsUrl:
+                        "https://raw.githubusercontent.com/qharo/EuroCities/main/Cities/Lyon/lyon_city_metrics.json",
                 },
                 {
                     name: "Marseille",
                     geojsonUrl:
-                        "https://raw.githubusercontent.com/qharo/EuroCities/ef2165a6d5654ae6ea9063f78af99a71583a1990/Cities/Marseille/marseille.geojson",
+                        "https://raw.githubusercontent.com/qharo/EuroCities/main/Cities/Marseille/marseille.geojson",
                     metricsUrl:
-                        "https://raw.githubusercontent.com/qharo/EuroCities/ef2165a6d5654ae6ea9063f78af99a71583a1990/Cities/Marseille/marseille_city_metrics.geojson",
+                        "https://raw.githubusercontent.com/qharo/EuroCities/main/Cities/Marseille/marseille_city_metrics.json",
+                },
+                {
+                    name: "Toulouse",
+                    geojsonUrl:
+                        "https://raw.githubusercontent.com/qharo/EuroCities/main/Cities/Toulouse/toulouse.geojson",
+                    metricsUrl:
+                        "https://raw.githubusercontent.com/qharo/EuroCities/main/Cities/Toulouse/toulouse_city_metrics.json",
                 },
                 {
                     name: "Bordeaux",
@@ -314,8 +323,11 @@
             }
 
             function sanitizeJSONString(jsonString) {
-                // Replace NaN values with null in JSON string
-                return jsonString.replace(/: *NaN/g, ": null");
+                // Replace NaN and Infinity values with null in JSON string
+                return jsonString
+                    .replace(/: *NaN/g, ": null")
+                    .replace(/: *Infinity/g, ": null")
+                    .replace(/: *-Infinity/g, ": null");
             }
 
             function loadCity(city) {
