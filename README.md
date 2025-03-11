@@ -1,4 +1,4 @@
-# EuroCity - Urban Accessibility Dashboard
+# EuroCities - Urban Accessibility Dashboard
 
 
 
@@ -6,7 +6,7 @@ https://github.com/user-attachments/assets/0f668dcb-32c9-41e7-8eac-b5eba47d259a
 
 
 
-EuroCity is an interactive web application for analyzing and visualizing urban accessibility metrics across European cities. The dashboard provides insights into transit accessibility, building age distribution, and green space proximity.
+EuroCities is an interactive web application for analyzing and visualizing urban accessibility metrics across European cities. The dashboard provides insights into transit accessibility, building age distribution, and green space proximity.
 
 ## Project Structure
 
