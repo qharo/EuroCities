@@ -16,6 +16,17 @@
         <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/3.9.1/chart.min.js"></script>
         <script src="https://cdnjs.cloudflare.com/ajax/libs/proj4js/2.8.0/proj4.js"></script>
 
+        <!-- Add MarkerCluster plugin -->
+        <link
+            rel="stylesheet"
+            href="https://cdnjs.cloudflare.com/ajax/libs/leaflet.markercluster/1.5.3/MarkerCluster.css"
+        />
+        <link
+            rel="stylesheet"
+            href="https://cdnjs.cloudflare.com/ajax/libs/leaflet.markercluster/1.5.3/MarkerCluster.Default.css"
+        />
+        <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet.markercluster/1.5.3/leaflet.markercluster.js"></script>
+
         <style>
             .leaflet-container {
                 height: 100%;
@@ -42,6 +53,77 @@
             .search-results {
                 max-height: 200px;
                 overflow-y: auto;
+            }
+            /* Cluster Marker Styles */
+            .cluster-marker {
+                display: flex;
+                align-items: center;
+                justify-content: center;
+                border-radius: 50%;
+                color: white;
+                font-weight: bold;
+                box-shadow: 0 0 0 2px white;
+            }
+            .cluster-marker.small {
+                width: 30px;
+                height: 30px;
+            }
+            .cluster-marker.medium {
+                width: 35px;
+                height: 35px;
+            }
+            .cluster-marker.large {
+                width: 40px;
+                height: 40px;
+            }
+            .cluster-distance {
+                background-color: rgba(26, 152, 80, 0.8);
+            }
+            .cluster-modes {
+                background-color: rgba(8, 81, 156, 0.8);
+            }
+            .cluster-age {
+                background-color: rgba(203, 24, 29, 0.8);
+            }
+            /* Toggle button styles */
+            .toggle-btn {
+                position: relative;
+                display: inline-block;
+                width: 48px;
+                height: 24px;
+            }
+            .toggle-btn input {
+                opacity: 0;
+                width: 0;
+                height: 0;
+            }
+            .toggle-slider {
+                position: absolute;
+                cursor: pointer;
+                top: 0;
+                left: 0;
+                right: 0;
+                bottom: 0;
+                background-color: #ccc;
+                border-radius: 24px;
+                transition: 0.4s;
+            }
+            .toggle-slider:before {
+                position: absolute;
+                content: "";
+                height: 18px;
+                width: 18px;
+                left: 3px;
+                bottom: 3px;
+                background-color: white;
+                border-radius: 50%;
+                transition: 0.4s;
+            }
+            input:checked + .toggle-slider {
+                background-color: #3b82f6;
+            }
+            input:checked + .toggle-slider:before {
+                transform: translateX(24px);
             }
         </style>
     </head>
@@ -110,7 +192,7 @@
                     <!-- Visualization Options -->
                     <div class="bg-white rounded-lg shadow-md p-4 mb-4">
                         <h4 class="font-bold text-gray-700 mb-2">
-                            Visualization Options
+                            Data Visualization
                         </h4>
                         <div class="flex flex-col space-y-2">
                             <div class="grid grid-cols-2 gap-2">
@@ -150,9 +232,13 @@
                                     >Show Building Age</label
                                 >
                             </div>
-
-                            <!-- Removed dot radius slider -->
                         </div>
+
+                        <input
+                            type="hidden"
+                            id="use-viewport-filtering"
+                            checked
+                        />
                     </div>
 
                     <div class="bg-white rounded-lg shadow-md p-4 mb-4">
@@ -164,6 +250,10 @@
                                 Select a city to see metrics
                             </p>
                         </div>
+                        <div
+                            id="points-count"
+                            class="text-sm text-gray-500 mt-2 text-right"
+                        ></div>
                     </div>
 
                     <div class="bg-white rounded-lg shadow-md p-4 mb-4">
@@ -234,6 +324,85 @@
                         "https://raw.githubusercontent.com/qharo/EuroCities/main/Cities/Milan/milan_city_metrics.json",
                 },
                 {
+                    name: "Madrid",
+                    geojsonUrl:
+                        "https://raw.githubusercontent.com/qharo/EuroCities/main/Cities/Madrid/madrid.geojson",
+                    metricsUrl:
+                        "https://raw.githubusercontent.com/qharo/EuroCities/main/Cities/Madrid/madrid_city_metrics.json",
+                },
+                {
+                    name: "Zaragoza",
+                    geojsonUrl:
+                        "https://raw.githubusercontent.com/qharo/EuroCities/main/Cities/Zaragoza/zaragoza.geojson",
+                    metricsUrl:
+                        "https://raw.githubusercontent.com/qharo/EuroCities/main/Cities/Zaragoza/zaragoza_city_metrics.json",
+                },
+                {
+                    name: "Valencia",
+                    geojsonUrl:
+                        "https://raw.githubusercontent.com/qharo/EuroCities/main/Cities/Valencia/valencia.geojson",
+                    metricsUrl:
+                        "https://raw.githubusercontent.com/qharo/EuroCities/main/Cities/Valencia/valencia_city_metrics.json",
+                },
+                {
+                    name: "Lisbon",
+                    geojsonUrl:
+                        "https://raw.githubusercontent.com/qharo/EuroCities/main/Cities/Lisbon/lisbon.geojson",
+                    metricsUrl:
+                        "https://raw.githubusercontent.com/qharo/EuroCities/main/Cities/Lisbon/lisbon_city_metrics.json",
+                },
+                {
+                    name: "Frankfurt",
+                    geojsonUrl:
+                        "https://raw.githubusercontent.com/qharo/EuroCities/main/Cities/Frankfurt/frankfurt.geojson",
+                    metricsUrl:
+                        "https://raw.githubusercontent.com/qharo/EuroCities/main/Cities/Frankfurt/frankfurt_city_metrics.json",
+                },
+
+                {
+                    name: "Brussels",
+                    geojsonUrl:
+                        "https://raw.githubusercontent.com/qharo/EuroCities/main/Cities/Brussels/brussels.geojson",
+                    metricsUrl:
+                        "https://raw.githubusercontent.com/qharo/EuroCities/main/Cities/Brussels/brussels_city_metrics.json",
+                },
+
+                {
+                    name: "Barcelona",
+                    geojsonUrl:
+                        "https://raw.githubusercontent.com/qharo/EuroCities/main/Cities/Barcelona/barcelona.geojson",
+                    metricsUrl:
+                        "https://raw.githubusercontent.com/qharo/EuroCities/main/Cities/Barcelona/barcelona_city_metrics.json",
+                },
+                {
+                    name: "Amsterdam",
+                    geojsonUrl:
+                        "https://raw.githubusercontent.com/qharo/EuroCities/main/Cities/Amsterdam/amsterdam.geojson",
+                    metricsUrl:
+                        "https://raw.githubusercontent.com/qharo/EuroCities/main/Cities/Amsterdam/amsterdam_city_metrics.json",
+                },
+                {
+                    name: "Sevilla",
+                    geojsonUrl:
+                        "https://raw.githubusercontent.com/qharo/EuroCities/main/Cities/Sevilla/seville.geojson",
+                    metricsUrl:
+                        "https://raw.githubusercontent.com/qharo/EuroCities/main/Cities/Sevilla/seville_city_metrics.json",
+                },
+                {
+                    name: "Vienna",
+                    geojsonUrl:
+                        "https://raw.githubusercontent.com/qharo/EuroCities/main/Cities/Vienna/vienna.geojson",
+                    metricsUrl:
+                        "https://raw.githubusercontent.com/qharo/EuroCities/main/Cities/Vienna/vienna_city_metrics.json",
+                },
+                {
+                    name: "Antwerp",
+                    geojsonUrl:
+                        "https://raw.githubusercontent.com/qharo/EuroCities/main/Cities/Antwerp/antwerp.geojson",
+                    metricsUrl:
+                        "https://raw.githubusercontent.com/qharo/EuroCities/main/Cities/Antwerp/antwerp_city_metrics.json",
+                },
+                {
                     name: "Munich",
                     geojsonUrl:
                         "https://raw.githubusercontent.com/qharo/EuroCities/main/Cities/Munich/munich.geojson",
@@ -258,12 +427,259 @@
 
             // Variables for our global data and layers
             let map, info, distanceLegend, modesLegend, ageLegend;
-            let buildingsLayer, stopsLayer, buildingAgeLayer;
+            let buildingsLayer,
+                stopsLayer,
+                buildingAgeLayer,
+                clusterLayer,
+                heatmapLayer,
+                customCanvasLayer;
             let currentMode = "distance"; // Default view
             let geoJsonData; // Will store our GeoJSON data
             let ageDistributionData; // Will store building age distribution
             let cityMetricsData;
             let transitPointsData; // Will store transit points info
+
+            // Performance optimization settings
+            // Dot mode is the only view mode
+            let useDataClustering = false; // No clustering
+            let useSampling = false; // Use all points
+            let samplingRate = 1.0; // Show 100% of the points
+            let useViewportFiltering = true;
+            let viewportFilterBufferFactor = 0.5; // Buffer around the viewport
+            let useCustomCanvasRenderer = true; // Always use advanced renderer
+
+            // Custom Canvas Overlay Class
+            class CanvasOverlay extends L.Layer {
+                constructor(options) {
+                    super(options);
+                    this._data = options.data || [];
+                    this._colorFunction =
+                        options.colorFunction || (() => "#ff0000");
+                    this._radiusFunction = options.radiusFunction || (() => 3);
+                    this._onClick = options.onClick || null;
+                    this._onHover = options.onHover || null;
+                    this._currentHover = null;
+                    this._zoomAnimated = false;
+                }
+
+                onAdd(map) {
+                    this._map = map;
+
+                    // Create canvas element
+                    const canvas = L.DomUtil.create(
+                        "canvas",
+                        "leaflet-canvas-layer"
+                    );
+                    const size = map.getSize();
+                    canvas.width = size.x;
+                    canvas.height = size.y;
+
+                    this._canvas = canvas;
+                    this._ctx = canvas.getContext("2d");
+
+                    // Position the canvas
+                    L.DomUtil.setPosition(
+                        canvas,
+                        map.containerPointToLayerPoint([0, 0])
+                    );
+
+                    // Append to the overlay pane
+                    map.getPanes().overlayPane.appendChild(canvas);
+
+                    // Add event listeners
+                    map.on("moveend", this._reset, this);
+                    map.on("resize", this._resize, this);
+
+                    if (this._onClick || this._onHover) {
+                        this._canvas.style.pointerEvents = "auto";
+                        this._canvas.addEventListener(
+                            "click",
+                            this._handleClick.bind(this)
+                        );
+                        this._canvas.addEventListener(
+                            "mousemove",
+                            this._handleMouseMove.bind(this)
+                        );
+                        this._canvas.addEventListener(
+                            "mouseout",
+                            this._handleMouseOut.bind(this)
+                        );
+                    }
+
+                    // Initial draw
+                    this._reset();
+                }
+
+                onRemove(map) {
+                    map.off("moveend", this._reset, this);
+                    map.off("resize", this._resize, this);
+
+                    if (this._canvas) {
+                        // Remove event listeners
+                        if (this._onClick || this._onHover) {
+                            this._canvas.removeEventListener(
+                                "click",
+                                this._handleClick.bind(this)
+                            );
+                            this._canvas.removeEventListener(
+                                "mousemove",
+                                this._handleMouseMove.bind(this)
+                            );
+                            this._canvas.removeEventListener(
+                                "mouseout",
+                                this._handleMouseOut.bind(this)
+                            );
+                        }
+
+                        // Remove from DOM
+                        if (this._canvas.parentNode) {
+                            this._canvas.parentNode.removeChild(this._canvas);
+                        }
+                    }
+
+                    this._canvas = null;
+                    this._ctx = null;
+                    this._map = null;
+                }
+
+                setData(data) {
+                    this._data = data;
+                    this._reset();
+                }
+
+                _resize(event) {
+                    if (!this._map || !this._canvas) return;
+
+                    const size = this._map.getSize();
+                    this._canvas.width = size.x;
+                    this._canvas.height = size.y;
+                    this._reset();
+                }
+
+                _reset() {
+                    if (!this._map || !this._canvas) return;
+
+                    const topLeft = this._map.containerPointToLayerPoint([
+                        0, 0,
+                    ]);
+                    L.DomUtil.setPosition(this._canvas, topLeft);
+                    this._redraw();
+                }
+
+                _redraw() {
+                    if (!this._map || !this._canvas) return;
+
+                    const ctx = this._ctx;
+                    const canvas = this._canvas;
+                    const map = this._map;
+
+                    // Clear canvas
+                    ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+                    // Draw all data points
+                    if (!this._data || !Array.isArray(this._data)) return;
+                    this._data.forEach((feature) => {
+                        const coords = feature.geometry.coordinates;
+                        const latlng = L.latLng(coords[1], coords[0]);
+                        const point = map.latLngToContainerPoint(latlng);
+
+                        // Only draw if the point is within the visible area (with a buffer)
+                        if (
+                            point.x > -50 &&
+                            point.y > -50 &&
+                            point.x < canvas.width + 50 &&
+                            point.y < canvas.height + 50
+                        ) {
+                            const color = this._colorFunction(feature);
+                            const radius = this._radiusFunction(feature);
+
+                            ctx.beginPath();
+                            ctx.arc(point.x, point.y, radius, 0, Math.PI * 2);
+                            ctx.fillStyle = color;
+                            ctx.fill();
+
+                            ctx.strokeStyle = "#000";
+                            ctx.lineWidth = 0.5;
+                            ctx.stroke();
+
+                            // Store point location for hit detection
+                            feature._canvasPoint = point;
+                            feature._canvasRadius = radius;
+                        } else {
+                            feature._canvasPoint = null; // Not visible
+                        }
+                    });
+                }
+
+                _handleClick(e) {
+                    if (!this._onClick || !this._canvas) return;
+
+                    const rect = this._canvas.getBoundingClientRect();
+                    const x = e.clientX - rect.left;
+                    const y = e.clientY - rect.top;
+
+                    const feature = this._findFeatureAt(x, y);
+                    if (feature) {
+                        this._onClick(feature);
+                    }
+                }
+
+                _handleMouseMove(e) {
+                    if (!this._onHover || !this._canvas) return;
+
+                    const rect = this._canvas.getBoundingClientRect();
+                    const x = e.clientX - rect.left;
+                    const y = e.clientY - rect.top;
+
+                    const feature = this._findFeatureAt(x, y);
+
+                    if (feature !== this._currentHover) {
+                        if (this._currentHover) {
+                            this._onHover(null); // Mouse out
+                        }
+
+                        this._currentHover = feature;
+
+                        if (feature) {
+                            this._onHover(feature); // Mouse over
+                        }
+                    }
+
+                    // Change cursor based on hit
+                    this._canvas.style.cursor = feature ? "pointer" : "auto";
+                }
+
+                _handleMouseOut() {
+                    if (this._currentHover && this._onHover) {
+                        this._onHover(null);
+                        this._currentHover = null;
+                    }
+                }
+
+                _findFeatureAt(x, y) {
+                    // Find the feature under the mouse cursor
+                    if (!this._data || !Array.isArray(this._data)) return null;
+
+                    for (let i = this._data.length - 1; i >= 0; i--) {
+                        const feature = this._data[i];
+                        if (!feature) continue;
+
+                        const point = feature._canvasPoint;
+                        if (!point) continue; // Point not visible
+
+                        const dx = point.x - x;
+                        const dy = point.y - y;
+                        const distance = Math.sqrt(dx * dx + dy * dy);
+
+                        if (distance <= feature._canvasRadius + 2) {
+                            // Slightly larger hit area
+                            return feature;
+                        }
+                    }
+
+                    return null;
+                }
+            }
 
             // Init map
             initMap();
@@ -291,6 +707,10 @@
                 distanceLegend = createLegend("distance");
                 modesLegend = createLegend("modes");
                 ageLegend = createLegend("age");
+
+                // Setup map events for various renderers
+                setupMapMoveEvents();
+                setupMapEventsForCustomCanvas();
             }
 
             // Initialize the search autocomplete
@@ -427,6 +847,9 @@
 
                         // Set up click handlers
                         setupMapClickHandler();
+
+                        // Update points count
+                        updatePointsCount();
                     })
                     .catch((error) => {
                         console.error("Error loading city data:", error);
@@ -436,6 +859,20 @@
                             </div>
                         `;
                     });
+            }
+
+            // Update points count in the UI
+            function updatePointsCount() {
+                if (!geoJsonData || !geoJsonData.features) return;
+
+                const pointsCountElement =
+                    document.getElementById("points-count");
+
+                // If the element doesn't exist, don't try to update it
+                if (!pointsCountElement) return;
+
+                const totalPoints = geoJsonData.features.length;
+                pointsCountElement.textContent = `Total data points: ${totalPoints.toLocaleString()}`;
             }
 
             // Transform coordinates from Lambert-93 to WGS84 if needed
@@ -548,6 +985,9 @@
                 if (buildingsLayer) map.removeLayer(buildingsLayer);
                 if (buildingAgeLayer) map.removeLayer(buildingAgeLayer);
                 if (stopsLayer) map.removeLayer(stopsLayer);
+                if (heatmapLayer) map.removeLayer(heatmapLayer);
+                if (clusterLayer) map.removeLayer(clusterLayer);
+                if (customCanvasLayer) map.removeLayer(customCanvasLayer);
                 map.removeControl(distanceLegend);
                 map.removeControl(modesLegend);
                 map.removeControl(ageLegend);
@@ -739,19 +1179,32 @@
                 document.getElementById("modes-btn").className =
                     "px-3 py-1 text-sm rounded border border-gray-300 bg-white hover:bg-gray-100 transition";
 
-                // Add appropriate layer and legend based on mode
+                // Add appropriate visualization based on settings
+                if (useCustomCanvasRenderer) {
+                    // Use custom canvas renderer for maximum performance
+                    customCanvasLayer = createCustomCanvasLayer(mode);
+                    if (customCanvasLayer) {
+                        customCanvasLayer.addTo(map);
+                    } else if (mode === "age") {
+                        // Fall back to distance if no age data
+                        toggleMode("distance");
+                        return;
+                    }
+                } else {
+                    // Use standard Leaflet visualization (dots or clustering)
+                    renderBuildingDots(mode);
+                }
+
+                // Add the appropriate legend
                 if (mode === "distance") {
                     document.getElementById("distance-btn").className =
                         "px-3 py-1 text-sm rounded border border-gray-300 bg-blue-500 text-white hover:bg-blue-600 transition";
-                    renderBuildingDots("distance");
                     distanceLegend.addTo(map);
                 } else if (mode === "modes") {
                     document.getElementById("modes-btn").className =
                         "px-3 py-1 text-sm rounded border border-gray-300 bg-blue-500 text-white hover:bg-blue-600 transition";
-                    renderBuildingDots("modes");
                     modesLegend.addTo(map);
                 } else if (mode === "age") {
-                    renderBuildingDots("age");
                     ageLegend.addTo(map);
                 }
 
@@ -759,7 +1212,79 @@
                 toggleStops();
             }
 
-            // Render buildings as colored dots
+            // Sample and filter data based on user settings
+            function sampleAndFilterData(features) {
+                if (!features || features.length === 0) return [];
+
+                // Start with all features
+                let filteredFeatures = [...features];
+
+                // Apply viewport filtering if enabled
+                if (useViewportFiltering) {
+                    const bounds = map.getBounds();
+
+                    // Calculate buffer (in degrees, which is approximate)
+                    const latBuffer =
+                        (bounds.getNorth() - bounds.getSouth()) *
+                        viewportFilterBufferFactor;
+                    const lngBuffer =
+                        (bounds.getEast() - bounds.getWest()) *
+                        viewportFilterBufferFactor;
+
+                    // Create extended bounds with buffer
+                    const extendedBounds = L.latLngBounds(
+                        L.latLng(
+                            bounds.getSouth() - latBuffer,
+                            bounds.getWest() - lngBuffer
+                        ),
+                        L.latLng(
+                            bounds.getNorth() + latBuffer,
+                            bounds.getEast() + lngBuffer
+                        )
+                    );
+
+                    // Filter features within extended bounds
+                    filteredFeatures = filteredFeatures.filter((feature) => {
+                        const coords = feature.geometry.coordinates;
+                        const latlng = L.latLng(coords[1], coords[0]);
+                        return extendedBounds.contains(latlng);
+                    });
+                }
+
+                // Apply sampling if enabled and if there are still many points
+                if (useSampling && filteredFeatures.length > 2000) {
+                    // Calculate how many points to keep
+                    const targetCount = Math.max(
+                        2000,
+                        Math.floor(filteredFeatures.length * samplingRate)
+                    );
+
+                    if (filteredFeatures.length > targetCount) {
+                        // Ensure deterministic sampling by using building IDs or coordinates
+                        filteredFeatures.sort((a, b) => {
+                            const coordsA = a.geometry.coordinates;
+                            const coordsB = b.geometry.coordinates;
+                            return (
+                                coordsA[0] +
+                                coordsA[1] -
+                                (coordsB[0] + coordsB[1])
+                            );
+                        });
+
+                        // Sample every nth element
+                        const step = Math.floor(
+                            filteredFeatures.length / targetCount
+                        );
+                        filteredFeatures = filteredFeatures.filter(
+                            (_, index) => index % step === 0
+                        );
+                    }
+                }
+
+                return filteredFeatures;
+            }
+
+            // Render buildings as colored dots (with clustering option)
             function renderBuildingDots(mode) {
                 if (
                     !geoJsonData ||
@@ -770,101 +1295,484 @@
 
                 if (buildingsLayer) map.removeLayer(buildingsLayer);
                 if (buildingAgeLayer) map.removeLayer(buildingAgeLayer);
+                if (clusterLayer) map.removeLayer(clusterLayer);
 
                 const radius = 4; // Fixed dot radius
 
-                // Create a canvas renderer for better performance with many dots
-                const canvasRenderer = L.canvas({ padding: 0.5 });
+                // If we should use clustering and we have a lot of points
+                if (useDataClustering && geoJsonData.features.length > 1000) {
+                    // Create a cluster group
+                    clusterLayer = L.markerClusterGroup({
+                        maxClusterRadius: 40,
+                        disableClusteringAtZoom: 17, // Show individual points at high zoom levels
+                        spiderfyOnMaxZoom: false,
+                        showCoverageOnHover: false,
+                        iconCreateFunction: function (cluster) {
+                            const count = cluster.getChildCount();
+                            let size;
+                            if (count < 10) size = "small";
+                            else if (count < 100) size = "medium";
+                            else size = "large";
 
+                            let colorClass;
+                            if (mode === "distance")
+                                colorClass = "cluster-distance";
+                            else if (mode === "modes")
+                                colorClass = "cluster-modes";
+                            else colorClass = "cluster-age";
+
+                            return L.divIcon({
+                                html: `<div class="cluster-marker ${colorClass} ${size}">${count}</div>`,
+                                className: "",
+                                iconSize: L.point(40, 40),
+                            });
+                        },
+                    });
+
+                    // Filter features based on mode
+                    let features;
+                    if (mode === "age") {
+                        features = geoJsonData.features.filter(
+                            (feature) =>
+                                feature.properties.year_built &&
+                                !isNaN(feature.properties.year_built)
+                        );
+
+                        if (features.length === 0) {
+                            alert(
+                                "No building age data available for this city"
+                            );
+                            // Fall back to distance visualization
+                            document.getElementById("show-age").checked = false;
+                            toggleMode("distance");
+                            return;
+                        }
+                    } else {
+                        features = geoJsonData.features;
+                    }
+
+                    // Sample data if needed
+                    features = sampleAndFilterData(features);
+
+                    // Create markers for each data point
+                    features.forEach((feature) => {
+                        const coords = feature.geometry.coordinates;
+                        const latlng = L.latLng(coords[1], coords[0]);
+
+                        let color;
+                        if (mode === "distance") {
+                            color = getDistanceColor(
+                                feature.properties.transit_distance
+                            );
+                        } else if (mode === "modes") {
+                            color = getModesColor(
+                                feature.properties.transit_modes
+                            );
+                        } else if (mode === "age") {
+                            color = getAgeColor(feature.properties.year_built);
+                        } else {
+                            color = "#cccccc"; // Default for unknown age
+                        }
+
+                        const marker = L.circleMarker(latlng, {
+                            radius: radius,
+                            fillColor: color,
+                            color: "#000",
+                            weight: 0.5,
+                            opacity: 0.9,
+                            fillOpacity: 0.7,
+                        });
+
+                        // Add popup on click instead of hover for better mobile experience
+                        marker.bindPopup(() => {
+                            let html = `<b>Distance to transit:</b> ${Math.round(
+                                feature.properties.transit_distance
+                            )} meters<br />`;
+                            html += `<b>Transit modes within 100m:</b> ${feature.properties.transit_modes}<br />`;
+
+                            if (
+                                feature.properties.year_built &&
+                                !isNaN(feature.properties.year_built)
+                            ) {
+                                html += `<b>Built:</b> ${
+                                    feature.properties.year_built
+                                } (${
+                                    new Date().getFullYear() -
+                                    feature.properties.year_built
+                                } years old)<br />`;
+                            }
+
+                            if (feature.properties.green_distance) {
+                                html += `<b>Distance to green space:</b> ${Math.round(
+                                    feature.properties.green_distance
+                                )} meters<br />`;
+                            }
+
+                            return html;
+                        });
+
+                        // Add hover events
+                        marker.on({
+                            mouseover: function () {
+                                info.update(feature.properties);
+                            },
+                            mouseout: function () {
+                                info.update();
+                            },
+                        });
+
+                        clusterLayer.addLayer(marker);
+                    });
+
+                    map.addLayer(clusterLayer);
+
+                    // Update points count
+                    const pointsCountElement =
+                        document.getElementById("points-count");
+                    pointsCountElement.textContent = `Showing ${features.length.toLocaleString()} of ${geoJsonData.features.length.toLocaleString()} points (clustered)`;
+                } else {
+                    // Use canvas renderer for non-clustered points
+                    const canvasRenderer = L.canvas({ padding: 0.5 });
+
+                    if (mode === "age") {
+                        // Filter buildings with year data
+                        const buildingsWithYear = geoJsonData.features.filter(
+                            (feature) =>
+                                feature.properties.year_built &&
+                                !isNaN(feature.properties.year_built)
+                        );
+
+                        if (buildingsWithYear.length === 0) {
+                            alert(
+                                "No building age data available for this city"
+                            );
+                            // Fall back to distance visualization
+                            document.getElementById("show-age").checked = false;
+                            toggleMode("distance");
+                            return;
+                        }
+
+                        // Apply sampling and filtering
+                        const filteredFeatures =
+                            sampleAndFilterData(buildingsWithYear);
+
+                        // Create a simplified GeoJSON with just the buildings that have year data
+                        const ageGeoJson = {
+                            type: "FeatureCollection",
+                            features: filteredFeatures,
+                        };
+
+                        // Create building age dots
+                        buildingAgeLayer = L.geoJSON(ageGeoJson, {
+                            renderer: canvasRenderer,
+                            pointToLayer: function (feature, latlng) {
+                                return L.circleMarker(latlng, {
+                                    radius: radius,
+                                    fillColor: getAgeColor(
+                                        feature.properties.year_built
+                                    ),
+                                    color: "#000",
+                                    weight: 0.5,
+                                    opacity: 0.9,
+                                    fillOpacity: 0.7,
+                                });
+                            },
+                            onEachFeature: function (feature, layer) {
+                                layer.on({
+                                    mouseover: function (e) {
+                                        info.update(feature.properties);
+                                    },
+                                    mouseout: function (e) {
+                                        info.update();
+                                    },
+                                });
+                            },
+                        }).addTo(map);
+
+                        // Update points count
+                        const pointsCountElement =
+                            document.getElementById("points-count");
+                        pointsCountElement.textContent = `Showing ${filteredFeatures.length.toLocaleString()} of ${buildingsWithYear.length.toLocaleString()} points with age data`;
+                    } else {
+                        // Apply sampling and filtering to all data
+                        const filteredFeatures = sampleAndFilterData(
+                            geoJsonData.features
+                        );
+
+                        // Create a simplified GeoJSON with the filtered buildings
+                        const filteredGeoJson = {
+                            type: "FeatureCollection",
+                            features: filteredFeatures,
+                        };
+
+                        // Create distance or modes dots
+                        buildingsLayer = L.geoJSON(filteredGeoJson, {
+                            renderer: canvasRenderer,
+                            pointToLayer: function (feature, latlng) {
+                                const color =
+                                    mode === "distance"
+                                        ? getDistanceColor(
+                                              feature.properties
+                                                  .transit_distance
+                                          )
+                                        : getModesColor(
+                                              feature.properties.transit_modes
+                                          );
+
+                                return L.circleMarker(latlng, {
+                                    radius: radius,
+                                    fillColor: color,
+                                    color: "#000",
+                                    weight: 0.5,
+                                    opacity: 0.9,
+                                    fillOpacity: 0.7,
+                                });
+                            },
+                            onEachFeature: function (feature, layer) {
+                                layer.on({
+                                    mouseover: function (e) {
+                                        info.update(feature.properties);
+                                    },
+                                    mouseout: function (e) {
+                                        info.update();
+                                    },
+                                });
+                            },
+                        }).addTo(map);
+
+                        // Update points count
+                        const pointsCountElement =
+                            document.getElementById("points-count");
+                        pointsCountElement.textContent = `Showing ${filteredFeatures.length.toLocaleString()} of ${geoJsonData.features.length.toLocaleString()} points`;
+                    }
+                }
+            }
+
+            // Create a heat map layer
+            function createHeatmapLayer() {
+                if (
+                    !geoJsonData ||
+                    !geoJsonData.features ||
+                    geoJsonData.features.length === 0
+                )
+                    return;
+
+                // Create array of points with intensity based on the current visualization mode
+                const heatPoints = [];
+
+                geoJsonData.features.forEach((feature) => {
+                    const coords = feature.geometry.coordinates;
+                    let intensity;
+
+                    if (currentMode === "distance") {
+                        // Normalize intensity - closer to transit = higher intensity
+                        const dist = feature.properties.transit_distance;
+                        // Invert the intensity scale to match the dot colors
+                        // 0-100m = high intensity (1.0), >1000m = low intensity (0.1)
+                        if (dist < 100) intensity = 1.0;
+                        else if (dist < 200) intensity = 0.85;
+                        else if (dist < 400) intensity = 0.7;
+                        else if (dist < 600) intensity = 0.5;
+                        else if (dist < 800) intensity = 0.3;
+                        else if (dist < 1000) intensity = 0.2;
+                        else intensity = 0.1;
+                    } else if (currentMode === "modes") {
+                        // More transit modes = higher intensity
+                        const modes = feature.properties.transit_modes;
+                        // 4+ modes = high intensity (1.0), 0 modes = low intensity (0.1)
+                        if (modes >= 4) intensity = 1.0;
+                        else if (modes === 3) intensity = 0.7;
+                        else if (modes === 2) intensity = 0.5;
+                        else if (modes === 1) intensity = 0.3;
+                        else intensity = 0.1;
+                    } else if (currentMode === "age") {
+                        // Older buildings = higher intensity (if year data exists)
+                        const year = feature.properties.year_built;
+                        if (year && !isNaN(year)) {
+                            const currentYear = new Date().getFullYear();
+                            const age = currentYear - year;
+                            // Age scale: 200+ years = high intensity (1.0), <10 years = low intensity (0.1)
+                            if (age > 200) intensity = 1.0;
+                            else if (age > 150) intensity = 0.85;
+                            else if (age > 100) intensity = 0.7;
+                            else if (age > 75) intensity = 0.6;
+                            else if (age > 50) intensity = 0.5;
+                            else if (age > 25) intensity = 0.3;
+                            else if (age > 10) intensity = 0.2;
+                            else intensity = 0.1;
+                        } else {
+                            intensity = 0.1; // Default low intensity for unknown age
+                        }
+                    }
+
+                    // Valid intensity values are typically between 0 and 1
+                    intensity = Math.min(1, Math.max(0.1, intensity));
+
+                    heatPoints.push([coords[1], coords[0], intensity]);
+                });
+
+                // Create the heat layer
+                const heatLayer = L.heatLayer(heatPoints, {
+                    radius: 15, // Size of each heat point
+                    blur: 20, // Blur radius
+                    maxZoom: 17, // Zoom level where heat turns to dots
+                    max: 1.0, // Max intensity
+                    gradient: {
+                        // Color gradient based on current mode - matches legend colors
+                        0.1:
+                            currentMode === "distance"
+                                ? "#d73027" // Farthest from transit (red)
+                                : currentMode === "modes"
+                                ? "#deebf7" // Least transit modes (light blue)
+                                : "#fee5d9", // Newest buildings (light pink)
+                        0.3:
+                            currentMode === "distance"
+                                ? "#fdae61"
+                                : currentMode === "modes"
+                                ? "#9ecae1"
+                                : "#fcbba1",
+                        0.5:
+                            currentMode === "distance"
+                                ? "#fee08b"
+                                : currentMode === "modes"
+                                ? "#6baed6"
+                                : "#fc9272",
+                        0.7:
+                            currentMode === "distance"
+                                ? "#a6d96a"
+                                : currentMode === "modes"
+                                ? "#3182bd"
+                                : "#cb181d",
+                        1.0:
+                            currentMode === "distance"
+                                ? "#1a9850" // Closest to transit (green)
+                                : currentMode === "modes"
+                                ? "#08519c" // Most transit modes (dark blue)
+                                : "#67000d", // Oldest buildings (dark red)
+                    },
+                });
+
+                return heatLayer;
+            }
+
+            // Render heatmap
+            function renderHeatmap() {
+                if (heatmapLayer) map.removeLayer(heatmapLayer);
+                heatmapLayer = createHeatmapLayer();
+                heatmapLayer.addTo(map);
+
+                // Update points count for heatmap
+                const pointsCountElement =
+                    document.getElementById("points-count");
+                pointsCountElement.textContent = `Heat map visualization of ${geoJsonData.features.length.toLocaleString()} points`;
+            }
+
+            // Create custom canvas layer for maximum performance
+            function createCustomCanvasLayer(mode) {
+                if (
+                    !geoJsonData ||
+                    !geoJsonData.features ||
+                    geoJsonData.features.length === 0
+                )
+                    return null;
+
+                // Filter and sample data if needed
+                let features;
                 if (mode === "age") {
-                    // Filter buildings with year data (changed from year to year_built)
-                    const buildingsWithYear = geoJsonData.features.filter(
+                    // Filter buildings with year data
+                    features = geoJsonData.features.filter(
                         (feature) =>
                             feature.properties.year_built &&
                             !isNaN(feature.properties.year_built)
                     );
 
-                    // Create a simplified GeoJSON with just the buildings that have year data
-                    const ageGeoJson = {
-                        type: "FeatureCollection",
-                        features: buildingsWithYear,
-                    };
-
-                    // Create building age dots
-                    buildingAgeLayer = L.geoJSON(ageGeoJson, {
-                        renderer: canvasRenderer,
-                        pointToLayer: function (feature, latlng) {
-                            return L.circleMarker(latlng, {
-                                radius: radius,
-                                fillColor: getAgeColor(
-                                    feature.properties.year_built
-                                ), // Changed from year to year_built
-                                color: "#000",
-                                weight: 0.5,
-                                opacity: 0.9,
-                                fillOpacity: 0.7,
-                            });
-                        },
-                        onEachFeature: function (feature, layer) {
-                            layer.on({
-                                mouseover: function (e) {
-                                    info.update(feature.properties);
-                                },
-                                mouseout: function (e) {
-                                    info.update();
-                                },
-                            });
-                        },
-                    }).addTo(map);
-
-                    // If there are no buildings with age data, show a message
-                    if (buildingsWithYear.length === 0) {
+                    if (features.length === 0) {
                         alert("No building age data available for this city");
-                        // Fall back to distance visualization
-                        document.getElementById("show-age").checked = false;
-                        toggleMode("distance");
+                        return null;
                     }
                 } else {
-                    // Use all data without sampling for performance
-                    const allBuildingsGeoJson = {
-                        type: "FeatureCollection",
-                        features: geoJsonData.features,
-                    };
-
-                    // Create distance or modes dots
-                    buildingsLayer = L.geoJSON(allBuildingsGeoJson, {
-                        renderer: canvasRenderer,
-                        pointToLayer: function (feature, latlng) {
-                            const color =
-                                mode === "distance"
-                                    ? getDistanceColor(
-                                          feature.properties.transit_distance
-                                      ) // Changed from transport_distance to transit_distance
-                                    : getModesColor(
-                                          feature.properties.transit_modes
-                                      );
-
-                            return L.circleMarker(latlng, {
-                                radius: radius,
-                                fillColor: color,
-                                color: "#000",
-                                weight: 0.5,
-                                opacity: 0.9,
-                                fillOpacity: 0.7,
-                            });
-                        },
-                        onEachFeature: function (feature, layer) {
-                            layer.on({
-                                mouseover: function (e) {
-                                    info.update(feature.properties);
-                                },
-                                mouseout: function (e) {
-                                    info.update();
-                                },
-                            });
-                        },
-                    }).addTo(map);
+                    features = geoJsonData.features;
                 }
+
+                // Apply sampling if needed (for very large datasets)
+                if (useSampling && features.length > 5000) {
+                    const targetCount = Math.max(
+                        5000,
+                        Math.floor(features.length * samplingRate)
+                    );
+                    const step = Math.floor(features.length / targetCount);
+                    features = features.filter(
+                        (_, index) => index % step === 0
+                    );
+                }
+
+                // Configure color and radius functions based on mode
+                const colorFunction = (feature) => {
+                    if (mode === "distance") {
+                        return getDistanceColor(
+                            feature.properties.transit_distance
+                        );
+                    } else if (mode === "modes") {
+                        return getModesColor(feature.properties.transit_modes);
+                    } else if (mode === "age") {
+                        return getAgeColor(feature.properties.year_built);
+                    }
+                    return "#cccccc";
+                };
+
+                const radiusFunction = (feature) => {
+                    return 4; // Fixed radius or you can make it dynamic based on zoom
+                };
+
+                // Create and return the canvas overlay
+                const canvasLayer = new CanvasOverlay({
+                    data: features,
+                    colorFunction: colorFunction,
+                    radiusFunction: radiusFunction,
+                    onClick: (feature) => {
+                        // Show a popup with feature info
+                        const coords = feature.geometry.coordinates;
+                        const latlng = L.latLng(coords[1], coords[0]);
+
+                        let html = `<b>Distance to transit:</b> ${Math.round(
+                            feature.properties.transit_distance
+                        )} meters<br />`;
+                        html += `<b>Transit modes within 100m:</b> ${feature.properties.transit_modes}<br />`;
+
+                        if (
+                            feature.properties.year_built &&
+                            !isNaN(feature.properties.year_built)
+                        ) {
+                            html += `<b>Built:</b> ${
+                                feature.properties.year_built
+                            } (${
+                                new Date().getFullYear() -
+                                feature.properties.year_built
+                            } years old)<br />`;
+                        }
+
+                        if (feature.properties.green_distance) {
+                            html += `<b>Distance to green space:</b> ${Math.round(
+                                feature.properties.green_distance
+                            )} meters<br />`;
+                        }
+
+                        L.popup()
+                            .setLatLng(latlng)
+                            .setContent(html)
+                            .openOn(map);
+                    },
+                    onHover: (feature) => {
+                        // Update the info control
+                        if (feature) {
+                            info.update(feature.properties);
+                        } else {
+                            info.update();
+                        }
+                    },
+                });
+
+                return canvasLayer;
             }
 
             // Create transit stops layer
@@ -944,12 +1852,45 @@
                 }
             }
 
+            // No view mode toggle needed as we only use dot view
+
+            // Set up re-rendering on map movement events to update viewport filtering
+            function setupMapMoveEvents() {
+                map.on("moveend", function () {
+                    if (
+                        useViewportFiltering &&
+                        !useDataClustering &&
+                        !useCustomCanvasRenderer
+                    ) {
+                        toggleMode(currentMode);
+                    }
+                });
+            }
+
+            // Setup map events for custom canvas
+            function setupMapEventsForCustomCanvas() {
+                map.on("zoomend", function () {
+                    if (customCanvasLayer && customCanvasLayer._map) {
+                        customCanvasLayer._reset();
+                    }
+                });
+
+                map.on("moveend", function () {
+                    if (customCanvasLayer && customCanvasLayer._map) {
+                        customCanvasLayer._reset();
+                    }
+                });
+            }
+
             // Setup map click handler
             function setupMapClickHandler() {
                 map.off("click"); // Remove existing handlers
 
                 map.on("click", function (e) {
                     if (!geoJsonData || !geoJsonData.features) return;
+
+                    // Only handle clicks if not using custom canvas renderer
+                    if (useCustomCanvasRenderer) return;
 
                     // Find the nearest building to the click location
                     let minDist = Infinity;
@@ -1066,11 +2007,11 @@
                     // Calculate transport metrics
                     const avgDistance =
                         geoJsonData.features.reduce(
-                            (sum, b) => sum + b.properties.transport_distance,
+                            (sum, b) => sum + b.properties.transit_distance,
                             0
                         ) / totalBuildings;
                     const buildingsNearTransit = geoJsonData.features.filter(
-                        (b) => b.properties.transport_modes > 0
+                        (b) => b.properties.transit_modes > 0
                     ).length;
                     const transitAccessPercent = Math.round(
                         (buildingsNearTransit / totalBuildings) * 100
@@ -1179,14 +2120,6 @@
                     "> 1000m": 0,
                 };
 
-                // Debugging - log the first few distance values
-                console.log(
-                    "First 10 distance values:",
-                    geoJsonData.features.slice(0, 10).map(
-                        (f) => f.properties.transit_distance // Changed from transport_distance to transit_distance
-                    )
-                );
-
                 // Make sure transit_distance is a number
                 geoJsonData.features.forEach((feature) => {
                     // Changed from transport_distance to transit_distance
@@ -1203,9 +2136,6 @@
                     else if (distance < 1000) distanceBuckets["600-1000m"]++;
                     else distanceBuckets["> 1000m"]++;
                 });
-
-                // Log the final counts for debugging
-                console.log("Distance bucket counts:", distanceBuckets);
 
                 // Create chart
                 if (window.transitChart) window.transitChart.destroy();
@@ -1277,7 +2207,7 @@
                 };
 
                 geoJsonData.features.forEach((feature) => {
-                    const modes = feature.properties.transport_modes;
+                    const modes = feature.properties.transit_modes;
                     if (modes === 0) modeBuckets["No transit"]++;
                     else if (modes === 1) modeBuckets["1 mode"]++;
                     else if (modes === 2) modeBuckets["2 modes"]++;
@@ -1424,8 +2354,6 @@
                 document
                     .getElementById("show-age")
                     .addEventListener("change", toggleBuildingAge);
-
-                // Removed dot radius slider event listener
             }
         </script>
     </body>
